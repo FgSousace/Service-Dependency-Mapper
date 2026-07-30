@@ -16,13 +16,24 @@ from typing import Any
 from service_dependency_mapper import __version__
 from service_dependency_mapper.analyzer import analyze
 from service_dependency_mapper.config import ConfigError, load_config, topological_order
+from service_dependency_mapper.discovery import (
+    DiscoveryError,
+    DiscoveryResult,
+    default_discovery_output,
+    discover_infrastructure,
+    host_component_id,
+    service_component_id,
+    write_discovery_map,
+)
 from service_dependency_mapper.graph import render_dot, render_mermaid
 from service_dependency_mapper.models import (
     AnalysisReport,
     AnalyzedResult,
+    Component,
     DependencyMap,
 )
 from service_dependency_mapper.reporting import render_json
+from service_dependency_mapper.topology import build_topology_layout
 
 BACKGROUND = "#07111f"
 PANEL = "#0d1d2b"
@@ -148,6 +159,365 @@ def report_summary(report: AnalysisReport) -> dict[str, str]:
     }
 
 
+def discovery_detail_lines(
+    discovery: DiscoveryResult | None,
+    component_id: str,
+) -> list[str]:
+    """Return inventory details for a discovered host or service component."""
+
+    if discovery is None:
+        return []
+    for host in discovery.hosts:
+        if host_component_id(host.address) == component_id:
+            return [
+                (
+                    f"Hostname: {host.hostname or 'unknown'}  |  "
+                    f"MAC: {host.mac_address or 'unknown'}  |  "
+                    f"ICMP: {'reply' if host.ping_responded else 'no reply'}"
+                ),
+                (
+                    "Open TCP ports: "
+                    + (
+                        ", ".join(str(service.port) for service in host.services)
+                        or "none detected"
+                    )
+                ),
+            ]
+        for service in host.services:
+            if service_component_id(host.address, service.port) != component_id:
+                continue
+            lines = [
+                (
+                    f"Protocol: {service.protocol}  |  "
+                    f"Secure: {'yes' if service.secure else 'no'}  |  "
+                    f"HTTP status: {service.http_status or 'n/a'}"
+                )
+            ]
+            if service.banner:
+                lines.append(f"Banner: {service.banner}")
+            return lines
+    return []
+
+
+def _shorten(value: str, length: int) -> str:
+    if len(value) <= length:
+        return value
+    return f"{value[: length - 1]}…"
+
+
+class TopologyWindow:
+    """Interactive, dependency-aware network topology rendered with Tk Canvas."""
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        dependency_map: DependencyMap,
+        report: AnalysisReport | None = None,
+        discovery: DiscoveryResult | None = None,
+    ) -> None:
+        self.dependency_map = dependency_map
+        self.report = report
+        self.discovery = discovery
+        self.results_by_id = (
+            {item.component.component_id: item for item in report.results}
+            if report
+            else {}
+        )
+        self.layout = build_topology_layout(dependency_map)
+        self.zoom_factor = 1.0
+
+        self.window = tk.Toplevel(parent)
+        self.window.title(f"Network topology — {dependency_map.service_name}")
+        self.window.geometry("1320x820")
+        self.window.minsize(860, 560)
+        self.window.configure(background=BACKGROUND)
+        self.window.rowconfigure(1, weight=1)
+        self.window.columnconfigure(0, weight=1)
+
+        self._build_header()
+        self._build_canvas()
+        self._build_details()
+        self._draw()
+        self.window.after(100, self.fit)
+
+    def _build_header(self) -> None:
+        header = tk.Frame(self.window, background=BACKGROUND, padx=18, pady=14)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        title = tk.Frame(header, background=BACKGROUND)
+        title.grid(row=0, column=0, sticky="w")
+        tk.Label(
+            title,
+            text=self.dependency_map.service_name,
+            background=BACKGROUND,
+            foreground=TEXT,
+            font=("Segoe UI Semibold", 16),
+        ).pack(anchor="w")
+        tk.Label(
+            title,
+            text=(
+                f"{len(self.dependency_map.components)} nodes • "
+                "dependency → component • mouse wheel to zoom"
+            ),
+            background=BACKGROUND,
+            foreground=MUTED,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 0))
+
+        legend = tk.Frame(header, background=BACKGROUND)
+        legend.grid(row=0, column=1, padx=18)
+        legend_items = (
+            ("NETWORK", CYAN),
+            ("HEALTHY", GREEN),
+            ("IMPACTED", YELLOW),
+            ("ROOT CAUSE", RED),
+        )
+        for text, color in legend_items:
+            tk.Label(
+                legend,
+                text=f"● {text}",
+                background=BACKGROUND,
+                foreground=color,
+                font=("Segoe UI Semibold", 8),
+            ).pack(side="left", padx=5)
+
+        controls = tk.Frame(header, background=BACKGROUND)
+        controls.grid(row=0, column=2, sticky="e")
+        ttk.Button(
+            controls,
+            text="−",
+            style="Secondary.TButton",
+            command=lambda: self.zoom(0.85),
+            width=3,
+        ).pack(side="left", padx=(0, 5))
+        ttk.Button(
+            controls,
+            text="+",
+            style="Secondary.TButton",
+            command=lambda: self.zoom(1.18),
+            width=3,
+        ).pack(side="left", padx=(0, 5))
+        ttk.Button(
+            controls,
+            text="Fit",
+            style="Secondary.TButton",
+            command=self.fit,
+        ).pack(side="left")
+
+    def _build_canvas(self) -> None:
+        frame = tk.Frame(
+            self.window,
+            background=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1,
+        )
+        frame.grid(row=1, column=0, sticky="nsew", padx=18)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(
+            frame,
+            background="#081522",
+            highlightthickness=0,
+            xscrollincrement=20,
+            yscrollincrement=20,
+        )
+        horizontal = ttk.Scrollbar(
+            frame, orient="horizontal", command=self.canvas.xview
+        )
+        vertical = ttk.Scrollbar(frame, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(
+            xscrollcommand=horizontal.set,
+            yscrollcommand=vertical.set,
+        )
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+
+        self.canvas.bind("<MouseWheel>", self._mouse_wheel)
+        self.canvas.bind("<Button-4>", lambda _event: self.zoom(1.1))
+        self.canvas.bind("<Button-5>", lambda _event: self.zoom(0.9))
+        self.canvas.bind("<ButtonPress-2>", self._pan_start)
+        self.canvas.bind("<B2-Motion>", self._pan_move)
+
+    def _build_details(self) -> None:
+        self.details = tk.StringVar(
+            value="Select a node to inspect its target, tags, dependencies, and state."
+        )
+        tk.Label(
+            self.window,
+            textvariable=self.details,
+            background=BACKGROUND,
+            foreground="#cbdce7",
+            justify="left",
+            anchor="w",
+            padx=18,
+            pady=12,
+            wraplength=1220,
+            font=("Consolas", 9),
+        ).grid(row=2, column=0, sticky="ew")
+
+    def _node_colors(self, component: Component) -> tuple[str, str]:
+        result = self.results_by_id.get(component.component_id)
+        if result:
+            diagnosis = result.diagnosis.value
+            if diagnosis == "root_cause":
+                return "#351521", RED
+            if diagnosis == "impacted":
+                return "#352c12", YELLOW
+            return "#102d29", GREEN
+        if "network" in component.tags:
+            return "#0a2a3a", CYAN
+        if "host" in component.tags:
+            return PANEL_ALT, "#67e8f9"
+        return "#111d2a", "#6b8798"
+
+    def _draw(self) -> None:
+        self.canvas.delete("all")
+        scale = self.zoom_factor
+
+        for component in self.dependency_map.components:
+            position = self.layout.nodes[component.component_id]
+            target_x = position.center_x * scale
+            target_y = position.top * scale
+            for dependency_id in component.depends_on:
+                dependency = self.layout.nodes[dependency_id]
+                source_x = dependency.center_x * scale
+                source_y = dependency.bottom * scale
+                middle_y = source_y + ((target_y - source_y) / 2)
+                self.canvas.create_line(
+                    source_x,
+                    source_y,
+                    source_x,
+                    middle_y,
+                    target_x,
+                    middle_y,
+                    target_x,
+                    target_y,
+                    fill="#36556a",
+                    width=max(1, round(2 * scale)),
+                    arrow="last",
+                    arrowshape=(
+                        max(6, round(9 * scale)),
+                        max(7, round(11 * scale)),
+                        max(3, round(4 * scale)),
+                    ),
+                    tags=("edge",),
+                )
+
+        for component in self.dependency_map.components:
+            position = self.layout.nodes[component.component_id]
+            x1 = position.x * scale
+            y1 = position.y * scale
+            x2 = (position.x + position.width) * scale
+            y2 = (position.y + position.height) * scale
+            node_tag = f"node_{component.component_id}"
+            fill, outline = self._node_colors(component)
+            self.canvas.create_rectangle(
+                x1,
+                y1,
+                x2,
+                y2,
+                fill=fill,
+                outline=outline,
+                width=max(1, round(2 * scale)),
+                tags=("node", node_tag),
+            )
+            self.canvas.create_oval(
+                x1 + (10 * scale),
+                y1 + (12 * scale),
+                x1 + (18 * scale),
+                y1 + (20 * scale),
+                fill=outline,
+                outline="",
+                tags=("node", node_tag),
+            )
+            self.canvas.create_text(
+                x1 + (26 * scale),
+                y1 + (11 * scale),
+                text=_shorten(component.name, 34),
+                anchor="nw",
+                fill=TEXT,
+                width=max(80, (position.width - 35) * scale),
+                font=("Segoe UI Semibold", max(7, round(10 * scale))),
+                tags=("node", node_tag),
+            )
+            subtitle = (
+                f"{component.check_type.upper()} • {_shorten(component.target, 31)}"
+            )
+            self.canvas.create_text(
+                x1 + (12 * scale),
+                y1 + (48 * scale),
+                text=subtitle,
+                anchor="nw",
+                fill=MUTED,
+                width=max(80, (position.width - 24) * scale),
+                font=("Consolas", max(6, round(8 * scale))),
+                tags=("node", node_tag),
+            )
+            self.canvas.tag_bind(
+                node_tag,
+                "<Button-1>",
+                lambda _event, component_id=component.component_id: self.select_node(
+                    component_id
+                ),
+            )
+
+        width = self.layout.width * scale
+        height = self.layout.height * scale
+        self.canvas.configure(scrollregion=(0, 0, width, height))
+
+    def select_node(self, component_id: str) -> None:
+        component = self.dependency_map.components_by_id[component_id]
+        result = self.results_by_id.get(component_id)
+        status = "NOT ANALYZED"
+        if result:
+            status = (
+                f"{result.result.status.value.upper()} / "
+                f"{result.diagnosis.value.replace('_', ' ').upper()}"
+            )
+        lines = [
+            f"{component.name} ({component.component_id})  |  "
+            f"Target: {component.target}  |  Status: {status}",
+            f"Depends on: {', '.join(component.depends_on) or 'none'}  |  "
+            f"Tags: {', '.join(component.tags) or 'none'}",
+        ]
+        lines.extend(discovery_detail_lines(self.discovery, component_id))
+        self.details.set("\n".join(lines))
+
+    def zoom(self, multiplier: float) -> None:
+        self.zoom_factor = min(2.2, max(0.3, self.zoom_factor * multiplier))
+        self._draw()
+
+    def fit(self) -> None:
+        self.window.update_idletasks()
+        available_width = max(300, self.canvas.winfo_width() - 30)
+        available_height = max(250, self.canvas.winfo_height() - 30)
+        self.zoom_factor = min(
+            1.25,
+            max(
+                0.3,
+                min(
+                    available_width / self.layout.width,
+                    available_height / self.layout.height,
+                ),
+            ),
+        )
+        self._draw()
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
+
+    def _mouse_wheel(self, event: tk.Event) -> None:
+        self.zoom(1.1 if event.delta > 0 else 0.9)
+
+    def _pan_start(self, event: tk.Event) -> None:
+        self.canvas.scan_mark(event.x, event.y)
+
+    def _pan_move(self, event: tk.Event) -> None:
+        self.canvas.scan_dragto(event.x, event.y, gain=1)
+
+
 class ServiceDependencyMapperGui:
     """Responsive desktop UI backed by the existing analysis engine."""
 
@@ -160,8 +530,11 @@ class ServiceDependencyMapperGui:
 
         self.current_map: DependencyMap | None = None
         self.current_report: AnalysisReport | None = None
+        self.current_discovery: DiscoveryResult | None = None
+        self.discovery_path: Path | None = None
         self.results_by_id: dict[str, AnalyzedResult] = {}
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
+        self.discovery_cancel = threading.Event()
         self.closed = False
         self.busy = False
 
@@ -171,7 +544,10 @@ class ServiceDependencyMapperGui:
         self.timeout = tk.StringVar()
         self.workers = tk.StringVar()
         self.status = tk.StringVar(
-            value="Select a YAML service map, then validate or run the analysis."
+            value=(
+                "Select a YAML map or discover the connected infrastructure "
+                "automatically."
+            )
         )
         self.overall = tk.StringVar(value="NOT RUN")
         self.root_causes = tk.StringVar(value="—")
@@ -337,7 +713,7 @@ class ServiceDependencyMapperGui:
         panel.columnconfigure(0, weight=1)
 
         ttk.Label(panel, text="SERVICE MAP", style="Section.TLabel").grid(
-            row=0, column=0, columnspan=5, sticky="w", pady=(0, 9)
+            row=0, column=0, columnspan=6, sticky="w", pady=(0, 9)
         )
         self.path_entry = ttk.Entry(panel, textvariable=self.config_path)
         self.path_entry.grid(row=1, column=0, sticky="ew", padx=(0, 8))
@@ -356,23 +732,30 @@ class ServiceDependencyMapperGui:
             command=self.create_template,
         )
         self.template_button.grid(row=1, column=2, padx=(0, 8))
+        self.discover_button = ttk.Button(
+            panel,
+            text="Discover infrastructure",
+            style="Secondary.TButton",
+            command=self.discover,
+        )
+        self.discover_button.grid(row=1, column=3, padx=(0, 8))
         self.validate_button = ttk.Button(
             panel,
             text="Validate",
             style="Secondary.TButton",
             command=self.validate,
         )
-        self.validate_button.grid(row=1, column=3, padx=(0, 8))
+        self.validate_button.grid(row=1, column=4, padx=(0, 8))
         self.run_button = ttk.Button(
             panel,
             text="Run analysis",
             style="Accent.TButton",
             command=self.run,
         )
-        self.run_button.grid(row=1, column=4)
+        self.run_button.grid(row=1, column=5)
 
         options = tk.Frame(panel, background=PANEL)
-        options.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(13, 0))
+        options.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(13, 0))
         tk.Label(
             options,
             text="Optional overrides",
@@ -494,6 +877,7 @@ class ServiceDependencyMapperGui:
         self.tree.tag_configure("healthy", foreground="#86efac")
         self.tree.tag_configure("root_cause", foreground="#fda4af")
         self.tree.tag_configure("impacted", foreground="#fde68a")
+        self.tree.tag_configure("discovered", foreground="#67e8f9")
         self.tree.bind("<<TreeviewSelect>>", self._show_selected_details)
 
         ttk.Label(results, text="DETAILS", style="Section.TLabel").grid(
@@ -531,6 +915,14 @@ class ServiceDependencyMapperGui:
 
         export = ttk.Frame(footer)
         export.grid(row=0, column=0, sticky="w")
+        self.view_topology_button = ttk.Button(
+            export,
+            text="View topology",
+            style="Accent.TButton",
+            command=self.open_topology,
+            state="disabled",
+        )
+        self.view_topology_button.pack(side="left", padx=(0, 7))
         self.export_json_button = ttk.Button(
             export,
             text="Export JSON",
@@ -566,6 +958,8 @@ class ServiceDependencyMapperGui:
 
     def _bind_shortcuts(self) -> None:
         self.root.bind("<Control-o>", lambda _event: self.browse())
+        self.root.bind("<Control-d>", lambda _event: self.discover())
+        self.root.bind("<Control-m>", lambda _event: self.open_topology())
         self.root.bind("<F5>", lambda _event: self.run())
         self.root.bind("<Control-s>", lambda _event: self.export_json())
 
@@ -579,6 +973,11 @@ class ServiceDependencyMapperGui:
         )
         if selected:
             self.config_path.set(selected)
+            self.current_map = None
+            self.current_report = None
+            self.current_discovery = None
+            self.discovery_path = None
+            self._enable_graph_exports(False)
             self.status.set("Configuration selected. Ready to validate.")
 
     def create_template(self) -> None:
@@ -600,7 +999,87 @@ class ServiceDependencyMapperGui:
             )
             return
         self.config_path.set(destination)
+        self.current_map = None
+        self.current_report = None
+        self.current_discovery = None
+        self.discovery_path = None
+        self._enable_graph_exports(False)
         self.status.set("New service map template created. Ready to validate.")
+
+    def discover(self) -> None:
+        """Discover connected private networks and open the generated topology."""
+
+        if self.busy:
+            return
+        self.discovery_cancel.clear()
+        self.current_report = None
+        self.current_discovery = None
+        self.results_by_id = {}
+        self._set_busy(True)
+        self.discover_button.configure(
+            text="Cancel discovery",
+            command=self.cancel_discovery,
+            state="normal",
+        )
+        self.overall.set("DISCOVERING")
+        self.root_causes.set("—")
+        self.component_count.set("0")
+        self.duration.set("—")
+        self.overall_value_label.configure(foreground=CYAN)
+        self.status.set("Detecting connected private IPv4 networks…")
+
+        def progress(stage: str, completed: int, total: int, message: str) -> None:
+            self.events.put(
+                (
+                    "discovery_progress",
+                    {
+                        "stage": stage,
+                        "completed": completed,
+                        "total": total,
+                        "message": message,
+                    },
+                )
+            )
+
+        def worker() -> None:
+            try:
+                result = discover_infrastructure(
+                    progress=progress,
+                    cancel_event=self.discovery_cancel,
+                )
+                destination = write_discovery_map(
+                    result,
+                    default_discovery_output(),
+                )
+                dependency_map = load_config(destination)
+                self.events.put(("discovery", (result, destination, dependency_map)))
+            except (DiscoveryError, ConfigError, OSError, ValueError) as exc:
+                event = (
+                    "discovery_cancelled"
+                    if self.discovery_cancel.is_set()
+                    else "discovery_error"
+                )
+                self.events.put((event, str(exc)))
+            except Exception as exc:
+                self.events.put(
+                    (
+                        "discovery_error",
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                )
+
+        threading.Thread(
+            target=worker,
+            name="sdmap-gui-discovery",
+            daemon=True,
+        ).start()
+
+    def cancel_discovery(self) -> None:
+        if not self.busy:
+            return
+        self.discovery_cancel.set()
+        self.discover_button.configure(state="disabled")
+        self.status.set("Cancelling infrastructure discovery…")
 
     def _load_map(self) -> DependencyMap:
         path_value = self.config_path.get().strip()
@@ -614,6 +1093,15 @@ class ServiceDependencyMapperGui:
             workers_override=workers,
         )
 
+    def _selected_discovery_is_current(self) -> bool:
+        if self.discovery_path is None:
+            return False
+        try:
+            selected = Path(self.config_path.get()).expanduser().resolve()
+        except OSError:
+            return False
+        return selected == self.discovery_path
+
     def validate(self) -> None:
         if self.busy:
             return
@@ -625,6 +1113,9 @@ class ServiceDependencyMapperGui:
             return
 
         self.current_map = dependency_map
+        if not self._selected_discovery_is_current():
+            self.current_discovery = None
+            self.discovery_path = None
         self._enable_graph_exports(True)
         order = " → ".join(topological_order(dependency_map))
         self.status.set(
@@ -648,6 +1139,9 @@ class ServiceDependencyMapperGui:
 
         self.current_map = dependency_map
         self.current_report = None
+        if not self._selected_discovery_is_current():
+            self.current_discovery = None
+            self.discovery_path = None
         self._set_busy(True)
         self.status.set(f"Checking {len(dependency_map.components)} components…")
 
@@ -674,9 +1168,100 @@ class ServiceDependencyMapperGui:
                     self._show_report(payload)
                 elif event == "error":
                     self._show_analysis_error(str(payload))
+                elif event == "discovery_progress":
+                    self._show_discovery_progress(payload)
+                elif event == "discovery":
+                    self._show_discovery(payload)
+                elif event == "discovery_error":
+                    self._show_discovery_error(str(payload))
+                elif event == "discovery_cancelled":
+                    self._show_discovery_cancelled()
         except queue.Empty:
             pass
         self.root.after(100, self._poll_events)
+
+    def _show_discovery_progress(self, payload: dict[str, Any]) -> None:
+        if not self.busy:
+            return
+        completed = int(payload.get("completed", 0))
+        total = int(payload.get("total", 0))
+        message = str(payload.get("message", "Discovering infrastructure…"))
+        suffix = f" ({completed}/{total})" if total else ""
+        self.status.set(f"{message}{suffix}")
+
+    def _show_discovery(
+        self,
+        payload: tuple[DiscoveryResult, Path, DependencyMap],
+    ) -> None:
+        result, destination, dependency_map = payload
+        self._set_busy(False)
+        self.current_discovery = result
+        self.discovery_path = destination.resolve()
+        self.current_map = dependency_map
+        self.current_report = None
+        self.results_by_id = {}
+        self.config_path.set(str(destination))
+
+        self.tree.delete(*self.tree.get_children())
+        for component in dependency_map.components:
+            category = "COMPONENT"
+            if "network" in component.tags:
+                category = "NETWORK"
+            elif "host" in component.tags:
+                category = "HOST"
+            elif "service" in component.tags:
+                category = "SERVICE"
+            self.tree.insert(
+                "",
+                "end",
+                iid=component.component_id,
+                values=(
+                    component.name,
+                    component.check_type.upper(),
+                    component.target,
+                    "FOUND",
+                    "—",
+                    category,
+                ),
+                tags=("discovered",),
+            )
+
+        self.overall.set("DISCOVERED")
+        self.overall_value_label.configure(foreground=CYAN)
+        self.root_causes.set("—")
+        self.component_count.set(str(len(dependency_map.components)))
+        self.duration.set(f"{result.duration_ms:.2f} ms")
+        warning = f" {len(result.warnings)} safety note(s)." if result.warnings else ""
+        self.status.set(
+            f"Discovery complete: {len(result.hosts)} host(s), "
+            f"{result.service_count} service(s). "
+            f"Map saved as {destination.name}.{warning}"
+        )
+        self._enable_graph_exports(True)
+
+        first = self.tree.get_children()
+        if first:
+            self.tree.selection_set(first[0])
+            self.tree.focus(first[0])
+            self._show_selected_details()
+        self.open_topology()
+
+    def _show_discovery_error(self, message: str) -> None:
+        self._set_busy(False)
+        self.overall.set("NOT RUN")
+        self.overall_value_label.configure(foreground=CYAN)
+        self.status.set("Infrastructure discovery failed.")
+        messagebox.showerror(
+            "Discovery failed",
+            message,
+            parent=self.root,
+        )
+
+    def _show_discovery_cancelled(self) -> None:
+        self._set_busy(False)
+        self.overall.set("NOT RUN")
+        self.overall_value_label.configure(foreground=CYAN)
+        self.status.set("Infrastructure discovery cancelled.")
 
     def _show_report(self, report: AnalysisReport) -> None:
         self._set_busy(False)
@@ -730,6 +1315,32 @@ class ServiceDependencyMapperGui:
             return
         item = self.results_by_id.get(selected[0])
         if item is None:
+            if self.current_map is None:
+                return
+            component = self.current_map.components_by_id.get(selected[0])
+            if component is None:
+                return
+            details = [
+                f"Component:  {component.name} ({component.component_id})",
+                f"Check:      {component.check_type.upper()}",
+                f"Target:     {component.target}",
+                f"Depends on: {', '.join(component.depends_on) or 'none'}",
+                f"Critical:   {'yes' if component.critical else 'no'}",
+                f"Tags:       {', '.join(component.tags) or 'none'}",
+            ]
+            inventory = discovery_detail_lines(
+                self.current_discovery,
+                component.component_id,
+            )
+            if inventory:
+                details.extend(["", *inventory])
+            details.extend(
+                [
+                    "",
+                    "State: discovered; run analysis for live health diagnosis.",
+                ]
+            )
+            self._set_details("\n".join(details))
             return
         details = [
             (
@@ -745,6 +1356,12 @@ class ServiceDependencyMapperGui:
             (f"Failed dependencies: {', '.join(item.failed_dependencies) or 'none'}"),
             f"Message:             {item.result.message}",
         ]
+        inventory = discovery_detail_lines(
+            self.current_discovery,
+            item.component.component_id,
+        )
+        if inventory:
+            details.extend(["", "Discovery inventory:", *inventory])
         if item.result.details:
             details.extend(
                 [
@@ -766,6 +1383,11 @@ class ServiceDependencyMapperGui:
         state = "disabled" if busy else "normal"
         self.browse_button.configure(state=state)
         self.template_button.configure(state=state)
+        self.discover_button.configure(
+            text="Discover infrastructure",
+            command=self.discover,
+            state=state,
+        )
         self.validate_button.configure(state=state)
         self.run_button.configure(state=state)
         self.path_entry.configure(state=state)
@@ -775,11 +1397,30 @@ class ServiceDependencyMapperGui:
             self._enable_graph_exports(False)
         else:
             self.progress.stop()
+            self._enable_graph_exports(True)
 
     def _enable_graph_exports(self, enabled: bool) -> None:
         state = "normal" if enabled and self.current_map is not None else "disabled"
         self.export_mermaid_button.configure(state=state)
         self.export_dot_button.configure(state=state)
+        self.view_topology_button.configure(state=state)
+
+    def open_topology(self) -> None:
+        if self.busy:
+            return
+        if self.current_map is None:
+            messagebox.showinfo(
+                "No topology available",
+                "Discover infrastructure or validate a YAML map first.",
+                parent=self.root,
+            )
+            return
+        TopologyWindow(
+            self.root,
+            self.current_map,
+            self.current_report,
+            self.current_discovery,
+        )
 
     def export_json(self) -> None:
         if self.current_report is None:
@@ -843,6 +1484,7 @@ class ServiceDependencyMapperGui:
 
     def _close(self) -> None:
         self.closed = True
+        self.discovery_cancel.set()
         self.root.destroy()
 
 

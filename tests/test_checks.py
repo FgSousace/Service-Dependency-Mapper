@@ -10,6 +10,7 @@ from service_dependency_mapper.checks import (
     check_dns,
     check_http,
     check_icmp,
+    check_none,
     check_tcp,
     check_tls,
     run_check,
@@ -81,6 +82,11 @@ class FakeTlsContext:
 
 
 class CheckTests(unittest.TestCase):
+    def test_topology_only_check_is_healthy_without_network_access(self):
+        result = check_none(make_component("none", {}))
+        self.assertEqual(result.status, CheckStatus.UP)
+        self.assertTrue(result.details["topology_only"])
+
     @patch("service_dependency_mapper.checks.socket.getaddrinfo")
     def test_dns_success(self, getaddrinfo):
         getaddrinfo.return_value = [

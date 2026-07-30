@@ -10,6 +10,13 @@ from pathlib import Path
 from service_dependency_mapper import __version__
 from service_dependency_mapper.analyzer import analyze
 from service_dependency_mapper.config import ConfigError, load_config, topological_order
+from service_dependency_mapper.discovery import (
+    DiscoveryError,
+    DiscoverySettings,
+    discover_infrastructure,
+    network_targets_from_cidrs,
+    write_discovery_map,
+)
 from service_dependency_mapper.graph import render_dot, render_mermaid
 from service_dependency_mapper.models import OverallStatus
 from service_dependency_mapper.reporting import render_json, render_table
@@ -19,7 +26,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sdmap",
         description=(
-            "Map service dependencies, run DNS/TCP/HTTP checks, "
+            "Discover infrastructure, map service dependencies, run active checks, "
             "and identify root-cause candidates."
         ),
     )
@@ -61,6 +68,47 @@ def _parser() -> argparse.ArgumentParser:
         help="Graph format (default: mermaid).",
     )
     graph.add_argument("-o", "--output", type=Path, help="Write graph to a file.")
+
+    discover = commands.add_parser(
+        "discover",
+        help="Discover private IPv4 networks, hosts, and generic TCP services.",
+    )
+    discover.add_argument(
+        "-n",
+        "--network",
+        action="append",
+        default=[],
+        metavar="CIDR",
+        help=(
+            "Private IPv4 network to scan; repeat for multiple networks. "
+            "Connected networks are detected automatically when omitted."
+        ),
+    )
+    discover.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=Path("discovered-infrastructure.yaml"),
+        help="Generated YAML map (default: discovered-infrastructure.yaml).",
+    )
+    discover.add_argument(
+        "--timeout",
+        type=float,
+        default=0.3,
+        help="Per-probe timeout in seconds (default: 0.3).",
+    )
+    discover.add_argument(
+        "--workers",
+        type=int,
+        default=96,
+        help="Concurrent discovery workers from 1 to 256 (default: 96).",
+    )
+    discover.add_argument(
+        "--max-hosts",
+        type=int,
+        default=1022,
+        help="Maximum addresses per network from 1 to 4094 (default: 1022).",
+    )
 
     gui = commands.add_parser("gui", help="Launch the desktop interface.")
     gui.add_argument(
@@ -124,6 +172,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_or_print(content, args.output)
             return 0
 
+        if args.command == "discover":
+            settings = DiscoverySettings(
+                timeout=args.timeout,
+                workers=args.workers,
+                max_hosts_per_network=args.max_hosts,
+            )
+            networks = (
+                network_targets_from_cidrs(
+                    args.network,
+                    max_hosts=args.max_hosts,
+                )
+                if args.network
+                else None
+            )
+            result = discover_infrastructure(networks, settings=settings)
+            output = write_discovery_map(result, args.output)
+            print(
+                f"Discovery complete: {len(result.hosts)} host(s), "
+                f"{result.service_count} service(s)."
+            )
+            print(f"Saved: {output}")
+            for warning in result.warnings:
+                print(f"Safety note: {warning}", file=sys.stderr)
+            return 0
+
         dependency_map = load_config(
             args.config,
             timeout_override=args.timeout,
@@ -140,8 +213,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_or_print(content, args.output)
         return 0 if report.overall_status is OverallStatus.HEALTHY else 1
 
+    except DiscoveryError as exc:
+        print(f"Discovery error: {exc}", file=sys.stderr)
+        return 2
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"Argument error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)

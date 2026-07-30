@@ -12,7 +12,7 @@ import yaml
 from service_dependency_mapper.models import Component, DependencyMap
 
 _COMPONENT_ID = re.compile(r"^[a-z][a-z0-9_-]*$")
-_CHECK_TYPES = {"dns", "http", "icmp", "tcp", "tls"}
+_CHECK_TYPES = {"dns", "http", "icmp", "none", "tcp", "tls"}
 
 
 class ConfigError(ValueError):
@@ -37,7 +37,15 @@ def _validate_check(check: dict[str, Any], location: str) -> str:
         allowed = ", ".join(sorted(_CHECK_TYPES))
         raise ConfigError(f"{location}.type must be one of: {allowed}.")
 
-    if check_type == "dns":
+    if check_type == "none":
+        unexpected = set(check) - {"type", "timeout"}
+        if unexpected:
+            names = ", ".join(sorted(unexpected))
+            raise ConfigError(
+                f"{location} has unsupported fields for a topology-only node: {names}."
+            )
+
+    elif check_type == "dns":
         target = check.get("target")
         if not isinstance(target, str) or not target.strip():
             raise ConfigError(f"{location}.target must be a non-empty hostname.")

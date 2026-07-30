@@ -6,8 +6,15 @@ from unittest.mock import patch
 
 from service_dependency_mapper.cli import main as cli_main
 from service_dependency_mapper.config import load_config
+from service_dependency_mapper.discovery import (
+    DiscoveredHost,
+    DiscoveredService,
+    DiscoveryResult,
+    NetworkTarget,
+)
 from service_dependency_mapper.gui import (
     DEFAULT_TEMPLATE,
+    discovery_detail_lines,
     parse_timeout,
     parse_workers,
     report_summary,
@@ -19,9 +26,11 @@ from service_dependency_mapper.models import (
     CheckResult,
     CheckStatus,
     Component,
+    DependencyMap,
     DiagnosticStatus,
     OverallStatus,
 )
+from service_dependency_mapper.topology import build_topology_layout
 
 
 def analyzed_result() -> AnalyzedResult:
@@ -110,6 +119,69 @@ class GuiHelperTests(unittest.TestCase):
             dependency_map = load_config(path)
         self.assertEqual(dependency_map.service_name, "My service")
         self.assertEqual(len(dependency_map.components), 5)
+
+    def test_topology_layout_places_dependencies_in_later_layers(self):
+        network = Component("network", "Network", "none", {})
+        host = Component(
+            "host",
+            "Host",
+            "icmp",
+            {"target": "192.168.1.10"},
+            depends_on=("network",),
+        )
+        service = Component(
+            "service",
+            "HTTPS",
+            "tcp",
+            {"host": "192.168.1.10", "port": 443},
+            depends_on=("host",),
+        )
+        dependency_map = DependencyMap(
+            "Infrastructure",
+            "",
+            2,
+            4,
+            (network, host, service),
+        )
+        layout = build_topology_layout(dependency_map)
+        self.assertEqual(layout.layers, 3)
+        self.assertLess(layout.nodes["network"].y, layout.nodes["host"].y)
+        self.assertLess(layout.nodes["host"].y, layout.nodes["service"].y)
+
+    def test_discovery_details_include_mac_ports_and_banner(self):
+        network = NetworkTarget(
+            "Ethernet",
+            "192.168.1.10",
+            "192.168.1.0/24",
+        )
+        service = DiscoveredService(
+            22,
+            "ssh",
+            banner="SSH-2.0-example",
+        )
+        host = DiscoveredHost(
+            "192.168.1.10",
+            network.network,
+            "host.lan",
+            "AA:BB:CC:DD:EE:FF",
+            True,
+            False,
+            True,
+            (service,),
+        )
+        discovery = DiscoveryResult("", "", 1, (network,), (host,))
+
+        host_details = discovery_detail_lines(
+            discovery,
+            "host_192_168_1_10",
+        )
+        service_details = discovery_detail_lines(
+            discovery,
+            "service_192_168_1_10_22",
+        )
+        self.assertIn("AA:BB:CC:DD:EE:FF", host_details[0])
+        self.assertIn("22", host_details[1])
+        self.assertIn("SSH-2.0-example", service_details[1])
 
 
 if __name__ == "__main__":

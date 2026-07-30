@@ -22,6 +22,18 @@ def _latency_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 2)
 
 
+def check_none(component: Component) -> CheckResult:
+    """Return a healthy result for a logical, topology-only component."""
+
+    return CheckResult(
+        component.component_id,
+        CheckStatus.UP,
+        0.0,
+        "Topology-only node; no active network check was requested.",
+        {"topology_only": True},
+    )
+
+
 def check_dns(component: Component) -> CheckResult:
     """Resolve a hostname and optionally verify expected addresses."""
 
@@ -352,6 +364,7 @@ def check_http(component: Component) -> CheckResult:
 CHECKS: dict[str, CheckFunction] = {
     "dns": check_dns,
     "icmp": check_icmp,
+    "none": check_none,
     "tcp": check_tcp,
     "tls": check_tls,
     "http": check_http,

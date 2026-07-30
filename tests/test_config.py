@@ -149,6 +149,25 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "count must be an integer"):
             self.load_text(content)
 
+    def test_loads_topology_only_component(self):
+        content = VALID_CONFIG.replace(
+            "type: dns\n      target: example.com",
+            "type: none",
+            1,
+        )
+        service_map = self.load_text(content)
+        self.assertEqual(service_map.components[0].check_type, "none")
+        self.assertEqual(service_map.components[0].target, "topology only")
+
+    def test_rejects_fields_on_topology_only_component(self):
+        content = VALID_CONFIG.replace(
+            "type: dns\n      target: example.com",
+            "type: none\n      target: example.com",
+            1,
+        )
+        with self.assertRaisesRegex(ConfigError, "unsupported fields"):
+            self.load_text(content)
+
 
 if __name__ == "__main__":
     unittest.main()
