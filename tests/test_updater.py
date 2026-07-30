@@ -41,6 +41,23 @@ class UpdateCheckTests(unittest.TestCase):
     def test_stable_version_is_newer_than_matching_prerelease(self):
         self.assertTrue(is_newer_version("1.3.0", "1.3.0-rc1"))
 
+    def test_distinguishes_matching_and_stale_update_feeds(self):
+        matching = fetch_update_info(
+            "1.4.0",
+            opener=lambda _request, *, timeout: FakeResponse(b'{"version":"1.4.0"}'),
+            cache_token="matching",
+        )
+        stale = fetch_update_info(
+            "1.5.0",
+            opener=lambda _request, *, timeout: FakeResponse(b'{"version":"1.4.0"}'),
+            cache_token="stale",
+        )
+
+        self.assertTrue(matching.versions_match)
+        self.assertFalse(matching.current_is_newer)
+        self.assertFalse(stale.versions_match)
+        self.assertTrue(stale.current_is_newer)
+
     def test_fetches_available_update(self):
         payload = json.dumps(
             {
@@ -52,16 +69,25 @@ class UpdateCheckTests(unittest.TestCase):
 
         def opener(request, *, timeout):
             captured["user_agent"] = request.headers["User-agent"]
+            captured["cache_control"] = request.headers["Cache-control"]
+            captured["url"] = request.full_url
             captured["timeout"] = timeout
             return FakeResponse(payload)
 
-        info = fetch_update_info("1.2.0", timeout=2.5, opener=opener)
+        info = fetch_update_info(
+            "1.2.0",
+            timeout=2.5,
+            opener=opener,
+            cache_token="fresh-check",
+        )
 
         self.assertTrue(info.update_available)
         self.assertEqual(info.latest_version, "1.3.0")
         self.assertEqual(info.summary, "Automatic update checks.")
         self.assertEqual(captured["timeout"], 2.5)
         self.assertIn("1.2.0", captured["user_agent"])
+        self.assertIn("_sdmap_cache=fresh-check", captured["url"])
+        self.assertEqual(captured["cache_control"], "no-cache, no-store")
 
     def test_rejects_invalid_manifest(self):
         def opener(_request, *, timeout):

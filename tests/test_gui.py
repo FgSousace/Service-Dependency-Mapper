@@ -15,6 +15,7 @@ from service_dependency_mapper.discovery import (
 from service_dependency_mapper.gui import (
     DEFAULT_TEMPLATE,
     discovery_detail_lines,
+    parse_discovery_targets,
     parse_timeout,
     parse_workers,
     report_summary,
@@ -85,6 +86,20 @@ class GuiHelperTests(unittest.TestCase):
         for value in ("1.5", "0", "257"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_workers(value)
+
+    def test_parses_extra_server_addresses_and_networks(self):
+        targets = parse_discovery_targets("192.168.1.50, 10.20.30.0/30;100.64.12.4")
+
+        self.assertEqual(
+            tuple(target.network for target in targets),
+            ("192.168.1.50/32", "10.20.30.0/30", "100.64.12.4/32"),
+        )
+        self.assertTrue(targets[0].exhaustive)
+        self.assertFalse(targets[1].exhaustive)
+        self.assertTrue(targets[2].exhaustive)
+
+    def test_blank_extra_server_addresses_use_automatic_discovery(self):
+        self.assertEqual(parse_discovery_targets("   "), ())
 
     def test_builds_treeview_row(self):
         row = result_row(analyzed_result())

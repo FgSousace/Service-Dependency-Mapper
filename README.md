@@ -4,9 +4,9 @@
 
 <p align="center">
   <a href="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml"><img src="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
-  <img src="https://img.shields.io/badge/version-1.4.0-22c55e" alt="Version 1.4.0">
+  <img src="https://img.shields.io/badge/version-1.5.0-22c55e" alt="Version 1.5.0">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/discovery-IPv4%20LAN%20%7C%20VPN-22d3ee" alt="IPv4 LAN and VPN discovery">
+  <img src="https://img.shields.io/badge/discovery-LAN%20%7C%20VPN%20%7C%20exact%20IP-22d3ee" alt="LAN VPN and exact IP discovery">
   <img src="https://img.shields.io/badge/checks-ICMP%20%7C%20DNS%20%7C%20TCP%20%7C%20TLS%20%7C%20HTTP-06b6d4" alt="ICMP DNS TCP TLS HTTP">
   <img src="https://img.shields.io/badge/GUI-Tkinter-34d399" alt="Desktop GUI">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
@@ -59,6 +59,7 @@ szybciej rozpocząć właściwą eskalację.
 | Funkcja | Działanie |
 |---|---|
 | 🔎 One-click discovery | Automatyczne wykrywanie podłączonych sieci prywatnych, hostów i usług |
+| 🎯 Skan konkretnego serwera | Wskazany adres IP jest sprawdzany na wszystkich 65 535 portach TCP, również gdy blokuje ping |
 | 🗺️ Interaktywna topologia | Pełny widok `sieć → host → usługa`, zoom, przesuwanie i szczegóły węzłów |
 | 🧭 Automatyczny inventory | IP, nazwa hosta, MAC, port, protokół, status HTTP i bezpiecznie odczytany banner |
 | 🧩 Mapa zależności | Definiowanie dowolnych łańcuchów i rozgałęzień w YAML |
@@ -131,6 +132,8 @@ GUI umożliwia:
 - bezpieczną instalację aktualizacji i restart aplikacji jednym przyciskiem,
 - automatyczny dobór równoległości do procesora albo ręczny limit `1–256`,
 - automatyczne wykrycie bieżącej infrastruktury jednym przyciskiem,
+- dodanie konkretnych adresów serwerów do tego samego skanu LAN/VPN,
+- pełny skan `1–65535/TCP` dla jawnie wpisanego, pojedynczego adresu IP,
 - anulowanie dłuższego skanowania bez zamrażania okna,
 - otwarcie interaktywnej mapy całej wykrytej topologii,
 - wybranie dowolnego pliku YAML,
@@ -153,12 +156,15 @@ Sprawdzanie oraz instalowanie aktualizacji również odbywa się w tle.
 ## 🔄 Automatyczne aktualizacje
 
 Po uruchomieniu GUI program w tle pobiera niewielki manifest wersji przez
-HTTPS. Start aplikacji nie jest przez to blokowany, a brak internetu nie
-powoduje błędu discovery ani analizy.
+HTTPS. Każde sprawdzenie ma unikalny parametr oraz nagłówki `no-cache`, dlatego
+stara odpowiedź z cache nie może udawać aktualnego stanu. Start aplikacji nie
+jest blokowany, a brak internetu nie powoduje błędu discovery ani analizy.
 
 Jeżeli dostępna jest nowa wersja, przycisk **Check for updates** zmieni się na
-**Update to v…**. Dla instalacji uruchamianej z klona repozytorium program po
-potwierdzeniu:
+**Update v… → v…**. Gdy wersja lokalna i wersja feedu są identyczne, przycisk
+pokazuje oba numery. Jeżeli feed byłby starszy od aplikacji, GUI jawnie pokaże
+**Feed … / local …** zamiast błędnego statusu **Up to date**. Dla instalacji
+uruchamianej z klona repozytorium program po potwierdzeniu:
 
 1. sprawdzi, czy lokalny checkout jest na gałęzi `main` i nie ma własnych zmian,
 2. wykona wyłącznie aktualizację typu fast-forward,
@@ -204,12 +210,35 @@ Nie musisz najpierw tworzyć pliku YAML. Uruchom GUI i kliknij
 
 1. program odczyta aktywne prywatne interfejsy IPv4 w Windowsie lub Linuksie,
 2. wykryje podłączone podsieci oraz dostępne bramy,
-3. połączy wyniki ICMP, tablicy ARP/neighbor cache i bezpiecznych prób TCP,
-4. sprawdzi porty TCP `1-1024` oraz zestaw często używanych portów wysokich,
-5. wykona reverse DNS oraz ogólne rozpoznanie HTTP, TLS i bannerów tekstowych,
-6. zapisze kompletny inventory jako nowy, timestampowany plik YAML,
-7. zbuduje zależności `sieć → host → usługa`,
-8. automatycznie otworzy interaktywną topologię.
+3. dołączy adresy z pola **Extra server IPs/CIDRs**,
+4. połączy wyniki ICMP, tablicy ARP/neighbor cache i prób TCP,
+5. sprawdzi porty TCP `1-1024` oraz zestaw często używanych portów wysokich,
+6. dla każdego dokładnego IP sprawdzi wszystkie porty `1-65535/TCP`,
+7. wykona reverse DNS oraz ogólne rozpoznanie HTTP, TLS i bannerów tekstowych,
+8. zapisze kompletny inventory jako nowy, timestampowany plik YAML,
+9. zbuduje zależności `sieć → host → usługa`,
+10. automatycznie otworzy interaktywną topologię.
+
+Jeżeli znasz adres pominiętego serwera, wpisz go w GUI, na przykład:
+
+```text
+192.168.1.50
+```
+
+Możesz podać kilka wartości rozdzielonych przecinkami:
+
+```text
+192.168.1.50, 10.20.30.15, 10.50.0.0/24
+```
+
+Pojedynczy adres prywatny lub publiczny uruchamia pełny skan TCP. Automatyczne
+skanowanie CIDR pozostaje ograniczone do sieci prywatnych i CGNAT. Discovery
+nie skanuje obecnie UDP, więc usługa dostępna wyłącznie po UDP nie zostanie
+rozpoznana jako otwarty port.
+
+> [!WARNING]
+> Pełny skan portów wykonuj wyłącznie wobec serwerów, które należą do Ciebie
+> albo na których skanowanie masz jednoznaczną zgodę.
 
 Mapa jest zapisywana w:
 
@@ -244,6 +273,12 @@ administrujesz:
 
 ```powershell
 sdmap discover --network 192.168.1.0/24 --output moja-infrastruktura.yaml
+```
+
+Dokładny adres IP, także serwera blokującego ICMP, uruchamia pełny skan TCP:
+
+```powershell
+sdmap discover --target 192.168.1.50 --output moj-serwer.yaml
 ```
 
 Sprawdź poprawność przykładowej mapy:
@@ -422,8 +457,10 @@ sdmap graph service.yaml --format dot --output service-map.dot
 
 ## 🧪 Testy i jakość
 
-Projekt ma **85 testów jednostkowych** obejmujących:
+Projekt ma **93 testy jednostkowe** obejmujące:
 
+- pełny skan TCP jawnych adresów, serwery blokujące ICMP i niestandardowe porty,
+- cache-busting manifestu oraz rozróżnianie zgodnego i starego feedu wersji,
 - dobór workerów do liczby logicznych CPU i limity poszczególnych etapów,
 - sprawdzanie wersji, ochronę lokalnych zmian i przebieg aktualizacji,
 - bezpieczne dekodowanie wyników poleceń na Windowsie niezależnie od strony kodowej,

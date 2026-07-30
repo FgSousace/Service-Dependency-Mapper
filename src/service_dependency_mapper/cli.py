@@ -92,12 +92,14 @@ def _parser() -> argparse.ArgumentParser:
     discover.add_argument(
         "-n",
         "--network",
+        "--target",
         action="append",
         default=[],
-        metavar="CIDR",
+        metavar="IP_OR_CIDR",
         help=(
-            "Private IPv4 network to scan; repeat for multiple networks. "
-            "Connected networks are detected automatically when omitted."
+            "IPv4 address or private CIDR to scan; repeat for multiple targets. "
+            "An exact private or public IP scans all TCP ports. Connected "
+            "networks are detected automatically when omitted."
         ),
     )
     discover.add_argument(

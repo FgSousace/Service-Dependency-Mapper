@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -21,9 +22,11 @@ from service_dependency_mapper.discovery import (
     DiscoveryError,
     DiscoveryResult,
     DiscoverySettings,
+    NetworkTarget,
     default_discovery_output,
     discover_infrastructure,
     host_component_id,
+    network_targets_from_cidrs,
     service_component_id,
     write_discovery_map,
 )
@@ -147,6 +150,15 @@ def parse_workers(
         workload=workload,
         location="Workers",
     )
+
+
+def parse_discovery_targets(value: str) -> tuple[NetworkTarget, ...]:
+    """Parse optional comma-, semicolon-, or whitespace-separated targets."""
+
+    entries = tuple(item for item in re.split(r"[\s,;]+", value.strip()) if item)
+    if not entries:
+        return ()
+    return network_targets_from_cidrs(entries)
 
 
 def result_row(item: AnalyzedResult) -> tuple[str, str, str, str, str, str]:
@@ -541,7 +553,7 @@ class ServiceDependencyMapperGui:
     def __init__(self, root: tk.Tk, config_path: str | Path | None = None) -> None:
         self.root = root
         self.root.title(f"Service Dependency Mapper {__version__}")
-        self.root.geometry("1240x820")
+        self.root.geometry("1240x850")
         self.root.minsize(960, 680)
         self.root.configure(background=BACKGROUND)
 
@@ -564,6 +576,7 @@ class ServiceDependencyMapperGui:
         )
         self.timeout = tk.StringVar()
         self.workers = tk.StringVar(value="Auto")
+        self.discovery_targets = tk.StringVar()
         self.status = tk.StringVar(
             value=(
                 "Select a YAML map or discover the connected infrastructure "
@@ -824,6 +837,29 @@ class ServiceDependencyMapperGui:
             font=("Segoe UI", 9),
         ).pack(side="left", padx=(12, 0))
 
+        targets = tk.Frame(panel, background=PANEL)
+        targets.grid(row=3, column=0, columnspan=6, sticky="ew", pady=(10, 0))
+        targets.columnconfigure(1, weight=1)
+        tk.Label(
+            targets,
+            text="Extra server IPs/CIDRs:",
+            background=PANEL,
+            foreground=MUTED,
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.target_entry = ttk.Entry(
+            targets,
+            textvariable=self.discovery_targets,
+        )
+        self.target_entry.grid(row=0, column=1, sticky="ew")
+        tk.Label(
+            targets,
+            text="Exact IP = all 65,535 TCP ports; separate targets with commas",
+            background=PANEL,
+            foreground=MUTED,
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=2, sticky="e", padx=(10, 0))
+
     def _build_summary(self, parent: ttk.Frame) -> None:
         summary = tk.Frame(parent, background=BACKGROUND)
         summary.grid(row=2, column=0, sticky="ew", pady=(0, 14))
@@ -1054,7 +1090,7 @@ class ServiceDependencyMapperGui:
         if info.update_available:
             self.version_badge.configure(foreground=YELLOW)
             self.update_button.configure(
-                text=f"Update to v{info.latest_version}",
+                text=(f"Update v{info.current_version} → v{info.latest_version}"),
                 style="Accent.TButton",
                 state=state,
             )
@@ -1062,16 +1098,40 @@ class ServiceDependencyMapperGui:
                 self.install_available_update()
             return
 
+        if info.current_is_newer:
+            self.version_badge.configure(foreground=YELLOW)
+            self.update_button.configure(
+                text=(f"Feed v{info.latest_version} / local v{info.current_version}"),
+                style="Secondary.TButton",
+                state=state,
+            )
+            if not silent:
+                messagebox.showwarning(
+                    "Update feed is older",
+                    (
+                        f"Installed: v{info.current_version}\n"
+                        f"Update feed: v{info.latest_version}\n\n"
+                        "The program cannot confirm that it is up to date. "
+                        "Try checking again."
+                    ),
+                    parent=self.root,
+                )
+            return
+
         self.version_badge.configure(foreground=GREEN)
         self.update_button.configure(
-            text="Up to date ✓",
+            text=f"v{info.current_version} is latest ✓",
             style="Secondary.TButton",
             state=state,
         )
         if not silent:
             messagebox.showinfo(
                 "No updates available",
-                f"Service Dependency Mapper v{__version__} is up to date.",
+                (
+                    f"Installed: v{info.current_version}\n"
+                    f"Latest: v{info.latest_version}\n\n"
+                    "The installed version matches the update feed."
+                ),
                 parent=self.root,
             )
 
@@ -1254,10 +1314,11 @@ class ServiceDependencyMapperGui:
                     else automatic_worker_count("discovery")
                 ),
             )
-        except ValueError as exc:
+            additional_targets = parse_discovery_targets(self.discovery_targets.get())
+        except (DiscoveryError, ValueError) as exc:
             self.status.set("Cannot start infrastructure discovery.")
             messagebox.showerror(
-                "Invalid performance settings",
+                "Invalid discovery settings",
                 str(exc),
                 parent=self.root,
             )
@@ -1299,6 +1360,7 @@ class ServiceDependencyMapperGui:
         def worker() -> None:
             try:
                 result = discover_infrastructure(
+                    additional_targets=additional_targets,
                     settings=settings,
                     progress=progress,
                     cancel_event=self.discovery_cancel,
@@ -1659,6 +1721,7 @@ class ServiceDependencyMapperGui:
         self.validate_button.configure(state=state)
         self.run_button.configure(state=state)
         self.path_entry.configure(state=state)
+        self.target_entry.configure(state=state)
         update_state = (
             "disabled"
             if busy or self.update_check_running or self.update_install_running

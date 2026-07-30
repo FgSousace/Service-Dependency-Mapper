@@ -6,7 +6,9 @@ import json
 import re
 import subprocess
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -39,6 +41,18 @@ class UpdateInfo:
     summary: str
     repository_url: str = REPOSITORY_URL
 
+    @property
+    def versions_match(self) -> bool:
+        """Return whether the installed version matches the update feed."""
+
+        return version_key(self.current_version) == version_key(self.latest_version)
+
+    @property
+    def current_is_newer(self) -> bool:
+        """Return whether the update feed is older than the installed version."""
+
+        return version_key(self.current_version) > version_key(self.latest_version)
+
 
 @dataclass(frozen=True)
 class UpdateResult:
@@ -69,20 +83,32 @@ def is_newer_version(candidate: str, current: str) -> bool:
     return version_key(candidate) > version_key(current)
 
 
+def _cache_busted_url(url: str, token: str) -> str:
+    separator = "&" if urllib.parse.urlsplit(url).query else "?"
+    return f"{url}{separator}_sdmap_cache={urllib.parse.quote(token, safe='')}"
+
+
 def fetch_update_info(
     current_version: str,
     *,
     timeout: float = 4.0,
     manifest_url: str = UPDATE_MANIFEST_URL,
     opener: Callable[..., Any] | None = None,
+    cache_token: str | None = None,
 ) -> UpdateInfo:
     """Fetch the small update manifest and compare it with the local version."""
 
     open_url = opener or urllib.request.urlopen
-    request = urllib.request.Request(
+    request_url = _cache_busted_url(
         manifest_url,
+        cache_token or str(time.time_ns()),
+    )
+    request = urllib.request.Request(
+        request_url,
         headers={
             "Accept": "application/json",
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache",
             "User-Agent": f"Service-Dependency-Mapper/{current_version}",
         },
     )

@@ -2,6 +2,33 @@
 
 Wszystkie istotne zmiany w projekcie są dokumentowane w tym pliku.
 
+## [1.5.0] - 2026-07-30
+
+### Added
+
+- optional GUI field for extra server IP addresses and private CIDRs,
+- exhaustive TCP port discovery from `1` through `65535` for every explicitly
+  entered exact IP address,
+- exact public-host targeting while keeping public CIDR scanning blocked,
+- `--target` CLI alias and exact-IP exhaustive discovery,
+- additional common server ports in automatic host discovery,
+- explicit-target tags, inventory metadata, and scan warnings.
+
+### Changed
+
+- extra GUI targets are combined with automatically detected LAN and VPN
+  networks,
+- exhaustive scans use adaptive worker limits and bounded progress events,
+- update status now displays both the installed and feed versions.
+
+### Fixed
+
+- update checks now add a unique cache-busting query and no-cache headers,
+- a stale update feed is shown as stale instead of incorrectly reporting
+  `Up to date`,
+- servers that block ICMP and listen only on a nonstandard TCP port can be
+  discovered by entering their exact IP.
+
 ## [1.4.0] - 2026-07-30
 
 ### Added

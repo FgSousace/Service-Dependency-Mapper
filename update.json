@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "released": "2026-07-30",
-  "summary": "Adaptive all-core parallelism for faster discovery and analysis."
+  "summary": "Exact-IP full TCP discovery and cache-safe, truthful update status."
 }

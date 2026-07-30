@@ -45,11 +45,31 @@ HOST_DISCOVERY_PORTS = (
     389,
     443,
     445,
+    1433,
+    1883,
+    2375,
+    3000,
+    3306,
     3389,
+    5432,
     5985,
+    6379,
+    6443,
+    7001,
     8000,
+    8008,
     8080,
+    8081,
+    8088,
     8443,
+    8888,
+    9000,
+    9090,
+    9200,
+    9443,
+    10000,
+    25565,
+    27017,
 )
 
 _COMMON_SCAN_PORTS = (
@@ -97,6 +117,7 @@ _COMMON_SCAN_PORTS = (
     995,
     1080,
     1194,
+    2222,
     1433,
     1521,
     1723,
@@ -105,11 +126,13 @@ _COMMON_SCAN_PORTS = (
     2375,
     2376,
     3000,
+    3001,
     3128,
     3268,
     3269,
     3306,
     3389,
+    4000,
     4443,
     5000,
     5060,
@@ -121,16 +144,23 @@ _COMMON_SCAN_PORTS = (
     5986,
     6379,
     6443,
+    7000,
     7001,
+    7474,
     8000,
     8008,
     8080,
     8081,
     8088,
+    8123,
     8443,
+    8500,
+    8686,
     8883,
     8888,
+    8983,
     9000,
+    9001,
     9042,
     9090,
     9100,
@@ -138,13 +168,18 @@ _COMMON_SCAN_PORTS = (
     9300,
     9418,
     9443,
+    9999,
+    10000,
     11211,
+    15672,
+    25565,
     27017,
 )
 
 # Every well-known TCP port is checked on a host once the host is found, with
 # additional high ports commonly used by infrastructure services.
 DEFAULT_SCAN_PORTS = tuple(sorted(set(range(1, 1025)).union(_COMMON_SCAN_PORTS)))
+ALL_TCP_PORTS = tuple(range(1, 65536))
 
 PORT_PROTOCOLS = {
     20: "ftp-data",
@@ -280,13 +315,14 @@ class DiscoveryError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class NetworkTarget:
-    """A private IPv4 network attached to a local interface."""
+    """An automatically detected network or explicitly selected IPv4 target."""
 
     interface: str
     local_address: str | None
     network: str
     gateway: str | None = None
     original_network: str | None = None
+    exhaustive: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +372,7 @@ class DiscoveryResult:
     warnings: tuple[str, ...] = ()
     worker_count: int = 1
     logical_processors: int = 1
+    exhaustive_addresses: tuple[str, ...] = ()
 
     @property
     def service_count(self) -> int:
@@ -352,6 +389,7 @@ class DiscoverySettings:
     workers: int = field(default_factory=lambda: automatic_worker_count("discovery"))
     max_hosts_per_network: int = 1022
     ports: tuple[int, ...] = DEFAULT_SCAN_PORTS
+    exhaustive_ports: tuple[int, ...] = ALL_TCP_PORTS
 
     def __post_init__(self) -> None:
         if self.timeout <= 0:
@@ -362,6 +400,12 @@ class DiscoverySettings:
             raise ValueError("Maximum hosts per network must be between 1 and 4094.")
         if not self.ports or any(not 1 <= port <= 65535 for port in self.ports):
             raise ValueError("Discovery ports must be integers from 1 to 65535.")
+        if not self.exhaustive_ports or any(
+            not 1 <= port <= 65535 for port in self.exhaustive_ports
+        ):
+            raise ValueError(
+                "Exhaustive discovery ports must be integers from 1 to 65535."
+            )
 
 
 def _decode_command_output(value: bytes | str | None) -> str:
@@ -705,7 +749,7 @@ def network_targets_from_cidrs(
     *,
     max_hosts: int = 1022,
 ) -> tuple[NetworkTarget, ...]:
-    """Validate explicit private CIDRs supplied through the CLI."""
+    """Validate explicit IP addresses or private CIDRs."""
 
     targets: list[NetworkTarget] = []
     seen: set[str] = set()
@@ -716,9 +760,13 @@ def network_targets_from_cidrs(
             raise DiscoveryError(f"Invalid network '{raw}': {exc}") from exc
         if not isinstance(network, ipaddress.IPv4Network):
             raise DiscoveryError(f"Only IPv4 discovery is supported: {raw}.")
-        if not _is_private_network(network):
+        authorized_public_host = (
+            network.prefixlen == 32 and network.network_address.is_global
+        )
+        if not _is_private_network(network) and not authorized_public_host:
             raise DiscoveryError(
-                f"Discovery is limited to private or carrier-grade NAT ranges: {raw}."
+                "CIDR discovery is limited to private or carrier-grade NAT "
+                f"ranges; only an exact public host may be targeted: {raw}."
             )
         host_count = max(1, network.num_addresses - 2)
         if host_count > max_hosts:
@@ -735,11 +783,43 @@ def network_targets_from_cidrs(
                 interface="manual",
                 local_address=None,
                 network=network_text,
+                exhaustive=network.prefixlen == 32,
             )
         )
     if not targets:
         raise DiscoveryError("At least one private IPv4 network is required.")
     return tuple(targets)
+
+
+def _merge_network_targets(
+    primary: tuple[NetworkTarget, ...],
+    additional: tuple[NetworkTarget, ...],
+) -> tuple[NetworkTarget, ...]:
+    """Add targets that are not already covered by a selected network."""
+
+    merged = list(primary)
+    selected_networks = [
+        ipaddress.ip_network(target.network, strict=False) for target in primary
+    ]
+    for target in additional:
+        candidate = ipaddress.ip_network(target.network, strict=False)
+        if any(candidate.subnet_of(selected) for selected in selected_networks):
+            continue
+        merged.append(target)
+        selected_networks.append(candidate)
+    return tuple(merged)
+
+
+def _target_addresses(targets: Iterable[NetworkTarget]) -> set[str]:
+    """Return addresses explicitly marked for exhaustive scanning."""
+
+    addresses: set[str] = set()
+    for target in targets:
+        if not target.exhaustive:
+            continue
+        network = ipaddress.ip_network(target.network, strict=False)
+        addresses.update(str(address) for address in network.hosts())
+    return addresses
 
 
 _MAC_PATTERN = re.compile(
@@ -947,6 +1027,7 @@ def _run_parallel(
     effective_workers = max(1, min(workers, total))
     results: list[Any] = []
     completed = 0
+    progress_interval = max(25, math.ceil(total / 500))
     iterator = iter(items)
     with ThreadPoolExecutor(
         max_workers=effective_workers,
@@ -978,7 +1059,11 @@ def _run_parallel(
                 except StopIteration:
                     continue
                 pending.add(pool.submit(function, item))
-            if completed == 1 or completed == total or completed % 25 == 0:
+            if (
+                completed == 1
+                or completed == total
+                or completed % progress_interval == 0
+            ):
                 _emit_progress(progress, stage, completed, total, message)
     return results
 
@@ -986,6 +1071,7 @@ def _run_parallel(
 def discover_infrastructure(
     networks: tuple[NetworkTarget, ...] | None = None,
     *,
+    additional_targets: tuple[NetworkTarget, ...] = (),
     settings: DiscoverySettings | None = None,
     progress: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
@@ -996,9 +1082,19 @@ def discover_infrastructure(
     worker_plan = build_discovery_worker_plan(settings.workers)
     started_clock = time.perf_counter()
     started_at = datetime.now(UTC).isoformat()
-    targets = networks or detect_local_networks(settings.max_hosts_per_network)
+    if networks is None:
+        try:
+            primary_targets = detect_local_networks(settings.max_hosts_per_network)
+        except DiscoveryError:
+            if not additional_targets:
+                raise
+            primary_targets = ()
+    else:
+        primary_targets = networks
+    targets = _merge_network_targets(primary_targets, additional_targets)
     if not targets:
         raise DiscoveryError("No private IPv4 networks were selected.")
+    exhaustive_addresses = _target_addresses((*primary_targets, *additional_targets))
 
     address_network: dict[str, str] = {}
     for target in targets:
@@ -1040,7 +1136,13 @@ def discover_infrastructure(
         target.local_address for target in targets if target.local_address
     }
     gateways = {target.gateway for target in targets if target.gateway}
-    alive = ping_alive | (set(neighbors) & set(addresses)) | local_addresses | gateways
+    alive = (
+        ping_alive
+        | (set(neighbors) & set(addresses))
+        | local_addresses
+        | gateways
+        | exhaustive_addresses
+    )
 
     unknown_addresses = [address for address in addresses if address not in alive]
     discovery_ports = sorted(set(HOST_DISCOVERY_PORTS) & set(settings.ports))
@@ -1067,16 +1169,27 @@ def discover_infrastructure(
         open_ports.setdefault(address, set()).add(port)
 
     sorted_alive = sorted(alive, key=lambda value: int(ipaddress.ip_address(value)))
+
+    def ports_for(address: str) -> tuple[int, ...]:
+        if address in exhaustive_addresses:
+            return settings.exhaustive_ports
+        return settings.ports
+
     remaining_total = sum(
-        sum(port not in open_ports.get(address, set()) for port in settings.ports)
+        sum(port not in open_ports.get(address, set()) for port in ports_for(address))
         for address in sorted_alive
     )
     remaining_tasks = (
         (address, port)
         for address in sorted_alive
-        for port in settings.ports
+        for port in ports_for(address)
         if port not in open_ports.get(address, set())
     )
+    service_message = "Scanning generic TCP services…"
+    if exhaustive_addresses:
+        service_message = (
+            "Scanning all TCP ports on explicitly targeted server addresses…"
+        )
     scanned_ports = _run_parallel(
         lambda item: (
             (item[0], item[1])
@@ -1088,7 +1201,7 @@ def discover_infrastructure(
         workers=worker_plan.tcp_workers,
         progress=progress,
         stage="services",
-        message="Scanning generic TCP services…",
+        message=service_message,
         cancel_event=cancel_event,
     )
     for address, port in scanned_ports:
@@ -1149,6 +1262,13 @@ def discover_infrastructure(
         f"{target.network} ({settings.max_hosts_per_network}-host safety limit)."
         for target in targets
         if target.original_network
+    ) + tuple(
+        f"Explicit target {address} was scanned across "
+        f"{len(settings.exhaustive_ports)} TCP ports."
+        for address in sorted(
+            exhaustive_addresses,
+            key=lambda value: int(ipaddress.ip_address(value)),
+        )
     )
     completed_at = datetime.now(UTC).isoformat()
     duration_ms = round((time.perf_counter() - started_clock) * 1000, 2)
@@ -1171,6 +1291,12 @@ def discover_infrastructure(
         warnings=warnings,
         worker_count=worker_plan.tcp_workers,
         logical_processors=worker_plan.logical_processors,
+        exhaustive_addresses=tuple(
+            sorted(
+                exhaustive_addresses,
+                key=lambda value: int(ipaddress.ip_address(value)),
+            )
+        ),
     )
 
 
@@ -1208,6 +1334,8 @@ def discovery_to_document(result: DiscoveryResult) -> dict[str, Any]:
         tags = ["discovered", "network", f"interface:{network.interface}"]
         if network.original_network:
             tags.append(f"bounded-from:{network.original_network}")
+        if network.exhaustive:
+            tags.append("explicit-target")
         components.append(
             {
                 "id": network_id,
@@ -1229,6 +1357,8 @@ def discovery_to_document(result: DiscoveryResult) -> dict[str, Any]:
             host_tags.append("gateway")
         if host.is_local:
             host_tags.append("local")
+        if host.address in result.exhaustive_addresses:
+            host_tags.append("explicit-target")
 
         if host.ping_responded:
             host_check: dict[str, Any] = {
@@ -1288,7 +1418,8 @@ def discovery_to_document(result: DiscoveryResult) -> dict[str, Any]:
         "service": {
             "name": "Discovered infrastructure",
             "description": (
-                "Vendor-neutral map generated from connected private IPv4 networks."
+                "Vendor-neutral map generated from detected networks and "
+                "explicit IPv4 targets."
             ),
         },
         "defaults": {"timeout": 2, "workers": "auto"},
@@ -1299,6 +1430,7 @@ def discovery_to_document(result: DiscoveryResult) -> dict[str, Any]:
             "networks": [network.network for network in result.networks],
             "hosts": len(result.hosts),
             "services": result.service_count,
+            "exhaustive_addresses": list(result.exhaustive_addresses),
             "performance": {
                 "workers": result.worker_count,
                 "logical_processors": result.logical_processors,
