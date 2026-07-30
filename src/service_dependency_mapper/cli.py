@@ -61,6 +61,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Graph format (default: mermaid).",
     )
     graph.add_argument("-o", "--output", type=Path, help="Write graph to a file.")
+
+    gui = commands.add_parser("gui", help="Launch the desktop interface.")
+    gui.add_argument(
+        "config",
+        nargs="?",
+        type=Path,
+        help="Optional YAML service map to preselect.",
+    )
     return parser
 
 
@@ -78,6 +86,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _parser().parse_args(argv)
     try:
+        if args.command == "gui":
+            try:
+                from service_dependency_mapper.gui import (
+                    GuiUnavailableError,
+                    launch_gui,
+                )
+            except ImportError:
+                print(
+                    "GUI error: Tkinter is not available in this Python installation.",
+                    file=sys.stderr,
+                )
+                return 2
+            try:
+                return launch_gui(args.config)
+            except GuiUnavailableError as exc:
+                print(f"GUI error: {exc}", file=sys.stderr)
+                return 2
+
         if args.command == "validate":
             dependency_map = load_config(args.config)
             order = " -> ".join(topological_order(dependency_map))

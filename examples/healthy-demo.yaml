@@ -16,14 +16,24 @@ components:
       target: example.com
     tags: [network, dns]
 
-  - id: web_tls
-    name: Web TLS endpoint
+  - id: web_tcp
+    name: Web TCP endpoint
     depends_on: [public_dns]
     check:
       type: tcp
       host: example.com
       port: 443
     tags: [network, frontend]
+
+  - id: web_tls
+    name: Website certificate
+    depends_on: [web_tcp]
+    check:
+      type: tls
+      host: example.com
+      port: 443
+      min_days_remaining: 14
+    tags: [security, certificate]
 
   - id: web_page
     name: Website
@@ -34,4 +44,3 @@ components:
       expected_status: [200]
       contains: Example Domain
     tags: [application, frontend]
-

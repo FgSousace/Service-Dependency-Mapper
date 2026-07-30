@@ -48,9 +48,9 @@ class Component:
     def target(self) -> str:
         """Return a compact target suitable for terminal reports."""
 
-        if self.check_type == "dns":
+        if self.check_type in {"dns", "icmp"}:
             return str(self.check["target"])
-        if self.check_type == "tcp":
+        if self.check_type in {"tcp", "tls"}:
             return f"{self.check['host']}:{self.check['port']}"
         return str(self.check["url"])
 

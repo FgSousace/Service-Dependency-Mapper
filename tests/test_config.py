@@ -118,6 +118,37 @@ class ConfigTests(unittest.TestCase):
         service_map = self.load_text(VALID_CONFIG)
         self.assertEqual(topological_order(service_map), ("dns", "tcp", "http"))
 
+    def test_loads_vendor_neutral_icmp_and_tls_checks(self):
+        content = (
+            VALID_CONFIG
+            + """
+  - id: gateway_ping
+    check:
+      type: icmp
+      target: 192.0.2.1
+      count: 2
+  - id: certificate
+    depends_on: [dns]
+    check:
+      type: tls
+      host: example.com
+"""
+        )
+        service_map = self.load_text(content)
+        by_id = service_map.components_by_id
+        self.assertEqual(by_id["gateway_ping"].check["count"], 2)
+        self.assertEqual(by_id["certificate"].check["port"], 443)
+        self.assertEqual(by_id["certificate"].check["min_days_remaining"], 14)
+
+    def test_rejects_invalid_icmp_count(self):
+        content = VALID_CONFIG.replace(
+            "type: dns\n      target: example.com",
+            "type: icmp\n      target: 192.0.2.1\n      count: 20",
+            1,
+        )
+        with self.assertRaisesRegex(ConfigError, "count must be an integer"):
+            self.load_text(content)
+
 
 if __name__ == "__main__":
     unittest.main()

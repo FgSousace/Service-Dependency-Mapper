@@ -12,7 +12,7 @@ import yaml
 from service_dependency_mapper.models import Component, DependencyMap
 
 _COMPONENT_ID = re.compile(r"^[a-z][a-z0-9_-]*$")
-_CHECK_TYPES = {"dns", "tcp", "http"}
+_CHECK_TYPES = {"dns", "http", "icmp", "tcp", "tls"}
 
 
 class ConfigError(ValueError):
@@ -49,9 +49,9 @@ def _validate_check(check: dict[str, Any], location: str) -> str:
                 f"{location}.expected_addresses must be a list of addresses."
             )
 
-    elif check_type == "tcp":
+    elif check_type in {"tcp", "tls"}:
         host = check.get("host")
-        port = check.get("port")
+        port = check.get("port", 443 if check_type == "tls" else None)
         if not isinstance(host, str) or not host.strip():
             raise ConfigError(f"{location}.host must be a non-empty hostname.")
         if (
@@ -60,6 +60,35 @@ def _validate_check(check: dict[str, Any], location: str) -> str:
             or not 1 <= port <= 65535
         ):
             raise ConfigError(f"{location}.port must be an integer from 1 to 65535.")
+        if check_type == "tls":
+            server_name = check.get("server_name")
+            if server_name is not None and (
+                not isinstance(server_name, str) or not server_name.strip()
+            ):
+                raise ConfigError(
+                    f"{location}.server_name must be a non-empty hostname."
+                )
+            min_days = check.get("min_days_remaining", 14)
+            if (
+                isinstance(min_days, bool)
+                or not isinstance(min_days, int)
+                or not 0 <= min_days <= 3650
+            ):
+                raise ConfigError(
+                    f"{location}.min_days_remaining must be an integer from 0 to 3650."
+                )
+
+    elif check_type == "icmp":
+        target = check.get("target")
+        if not isinstance(target, str) or not target.strip():
+            raise ConfigError(f"{location}.target must be a non-empty host or IP.")
+        count = check.get("count", 1)
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or not 1 <= count <= 10
+        ):
+            raise ConfigError(f"{location}.count must be an integer from 1 to 10.")
 
     elif check_type == "http":
         url = check.get("url")
@@ -231,6 +260,11 @@ def load_config(
         check_copy = dict(check)
         check_copy.pop("type", None)
         check_copy.pop("timeout", None)
+        if check_type == "tls":
+            check_copy.setdefault("port", 443)
+            check_copy.setdefault("min_days_remaining", 14)
+        elif check_type == "icmp":
+            check_copy.setdefault("count", 1)
 
         components.append(
             Component(

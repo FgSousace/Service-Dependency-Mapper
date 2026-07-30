@@ -1,8 +1,8 @@
 version: 1
 
 service:
-  name: Example monitoring stack
-  description: Replace the lab addresses before running this example.
+  name: Optional Zabbix lab
+  description: One vendor-specific example; the mapper itself is vendor-neutral.
 
 defaults:
   timeout: 3
@@ -26,12 +26,13 @@ components:
     tags: [monitoring, backend]
 
   - id: web_tls
-    name: Zabbix web TLS
+    name: Zabbix web certificate
     depends_on: [monitoring_dns]
     check:
-      type: tcp
+      type: tls
       host: zabbix.lab.local
       port: 443
+      min_days_remaining: 14
     tags: [monitoring, frontend]
 
   - id: web_ui
@@ -53,4 +54,3 @@ components:
       host: 192.168.1.20
       port: 10050
     tags: [monitoring, agent]
-

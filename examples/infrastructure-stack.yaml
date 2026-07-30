@@ -1,0 +1,83 @@
+version: 1
+
+service:
+  name: Mixed infrastructure template
+  description: Replace the reserved example addresses before running this map.
+
+defaults:
+  timeout: 3
+  workers: 10
+
+components:
+  - id: edge_router
+    name: Edge router
+    check:
+      type: icmp
+      target: 192.0.2.1
+      count: 2
+    tags: [network, router]
+
+  - id: public_dns
+    name: Public DNS
+    depends_on: [edge_router]
+    check:
+      type: dns
+      target: portal.example.com
+    tags: [network, dns]
+
+  - id: vpn_gateway
+    name: VPN gateway
+    depends_on: [edge_router]
+    check:
+      type: tcp
+      host: 192.0.2.10
+      port: 443
+    tags: [network, vpn]
+
+  - id: database
+    name: PostgreSQL database
+    depends_on: [edge_router]
+    check:
+      type: tcp
+      host: 192.0.2.20
+      port: 5432
+    tags: [application, database]
+
+  - id: cache
+    name: Redis cache
+    critical: false
+    depends_on: [edge_router]
+    check:
+      type: tcp
+      host: 192.0.2.21
+      port: 6379
+    tags: [application, cache]
+
+  - id: portal_tls
+    name: Portal certificate
+    depends_on: [public_dns]
+    check:
+      type: tls
+      host: portal.example.com
+      port: 443
+      min_days_remaining: 21
+    tags: [security, certificate]
+
+  - id: backend_api
+    name: Backend API
+    depends_on: [database, cache]
+    check:
+      type: http
+      url: https://api.example.com/health
+      expected_status: [200]
+      contains: healthy
+    tags: [application, api]
+
+  - id: customer_portal
+    name: Customer portal
+    depends_on: [portal_tls, backend_api]
+    check:
+      type: http
+      url: https://portal.example.com/health
+      expected_status: [200]
+    tags: [application, frontend]
