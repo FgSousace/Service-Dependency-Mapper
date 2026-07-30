@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml"><img src="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
-  <img src="https://img.shields.io/badge/version-1.2.0-22c55e" alt="Version 1.2.0">
+  <img src="https://img.shields.io/badge/version-1.3.0-22c55e" alt="Version 1.3.0">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/discovery-IPv4%20LAN%20%7C%20VPN-22d3ee" alt="IPv4 LAN and VPN discovery">
   <img src="https://img.shields.io/badge/checks-ICMP%20%7C%20DNS%20%7C%20TCP%20%7C%20TLS%20%7C%20HTTP-06b6d4" alt="ICMP DNS TCP TLS HTTP">
@@ -21,6 +21,7 @@
   <a href="#-szybki-start">Szybki start</a> •
   <a href="#%EF%B8%8F-graficzny-interfejs">GUI</a> •
   <a href="#-automatyczne-wykrywanie">Discovery</a> •
+  <a href="#-automatyczne-aktualizacje">Aktualizacje</a> •
   <a href="#-jak-to-działa">Jak to działa</a> •
   <a href="#%EF%B8%8F-konfiguracja">Konfiguracja</a> •
   <a href="#-polecenia">Polecenia</a> •
@@ -61,6 +62,7 @@ szybciej rozpocząć właściwą eskalację.
 | 🧭 Automatyczny inventory | IP, nazwa hosta, MAC, port, protokół, status HTTP i bezpiecznie odczytany banner |
 | 🧩 Mapa zależności | Definiowanie dowolnych łańcuchów i rozgałęzień w YAML |
 | 🖥️ Desktop GUI | Discovery, wybór mapy, wizualizacja, analiza i eksport bez wpisywania komend |
+| 🔄 Bezpieczne aktualizacje | Automatyczne sprawdzanie wersji i aktualizacja z GUI po potwierdzeniu |
 | 📡 Kontrole ICMP | Sprawdzanie osiągalności hostów przez systemowe polecenie ping |
 | 🌐 Kontrole DNS | Rozwiązywanie nazw i opcjonalna weryfikacja oczekiwanych adresów |
 | 🔌 Kontrole TCP | Sprawdzanie dostępności portu z limitem czasu |
@@ -123,6 +125,8 @@ sdmap-gui
 
 GUI umożliwia:
 
+- automatyczne sprawdzenie dostępności nowej wersji po uruchomieniu,
+- bezpieczną instalację aktualizacji i restart aplikacji jednym przyciskiem,
 - automatyczne wykrycie bieżącej infrastruktury jednym przyciskiem,
 - anulowanie dłuższego skanowania bez zamrażania okna,
 - otwarcie interaktywnej mapy całej wykrytej topologii,
@@ -137,10 +141,31 @@ GUI umożliwia:
 
 Discovery i analiza działają w osobnych wątkach, dlatego okno pozostaje
 responsywne również podczas skanowania i oczekiwania na timeouty sieciowe.
+Sprawdzanie oraz instalowanie aktualizacji również odbywa się w tle.
 
 <p align="center">
   <img src="assets/gui-preview.svg" alt="Podgląd graficznego interfejsu Service Dependency Mapper" width="100%">
 </p>
+
+## 🔄 Automatyczne aktualizacje
+
+Po uruchomieniu GUI program w tle pobiera niewielki manifest wersji przez
+HTTPS. Start aplikacji nie jest przez to blokowany, a brak internetu nie
+powoduje błędu discovery ani analizy.
+
+Jeżeli dostępna jest nowa wersja, przycisk **Check for updates** zmieni się na
+**Update to v…**. Dla instalacji uruchamianej z klona repozytorium program po
+potwierdzeniu:
+
+1. sprawdzi, czy lokalny checkout jest na gałęzi `main` i nie ma własnych zmian,
+2. wykona wyłącznie aktualizację typu fast-forward,
+3. zaktualizuje pakiet w tym samym środowisku `.venv`,
+4. zaproponuje ponowne uruchomienie GUI.
+
+Updater nigdy nie nadpisuje lokalnych modyfikacji i nie instaluje aktualizacji
+bez potwierdzenia użytkownika. Przycisk umożliwia też ręczne ponowienie
+sprawdzenia wersji. W instalacji bez lokalnego checkoutu aktualizowany jest
+pakiet z oficjalnego repozytorium w bieżącym środowisku Pythona.
 
 ## 🔎 Automatyczne wykrywanie
 
@@ -367,8 +392,10 @@ sdmap graph service.yaml --format dot --output service-map.dot
 
 ## 🧪 Testy i jakość
 
-Projekt ma **65 testów jednostkowych** obejmujących:
+Projekt ma **75 testów jednostkowych** obejmujących:
 
+- sprawdzanie wersji, ochronę lokalnych zmian i przebieg aktualizacji,
+- bezpieczne dekodowanie wyników poleceń na Windowsie niezależnie od strony kodowej,
 - wykrywanie interfejsów i bezpieczne ograniczanie dużych podsieci,
 - łączenie wyników ICMP, ARP i TCP,
 - rozpoznawanie usług oraz generowanie kompletnego inventory YAML,
@@ -415,9 +442,11 @@ Service-Dependency-Mapper/
 │   ├── gui.py
 │   ├── models.py
 │   ├── reporting.py
-│   └── topology.py
+│   ├── topology.py
+│   └── updater.py
 ├── tests/
 ├── CHANGELOG.md
+├── update.json
 ├── LICENSE
 ├── pyproject.toml
 └── README.md

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -34,6 +35,12 @@ from service_dependency_mapper.models import (
 )
 from service_dependency_mapper.reporting import render_json
 from service_dependency_mapper.topology import build_topology_layout
+from service_dependency_mapper.updater import (
+    UpdateInfo,
+    UpdateResult,
+    fetch_update_info,
+    install_update,
+)
 
 BACKGROUND = "#07111f"
 PANEL = "#0d1d2b"
@@ -537,6 +544,10 @@ class ServiceDependencyMapperGui:
         self.discovery_cancel = threading.Event()
         self.closed = False
         self.busy = False
+        self.latest_update: UpdateInfo | None = None
+        self.update_check_running = False
+        self.update_install_running = False
+        self.update_installed = False
 
         self.config_path = tk.StringVar(
             value=str(Path(config_path)) if config_path else ""
@@ -559,6 +570,7 @@ class ServiceDependencyMapperGui:
         self._bind_shortcuts()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(100, self._poll_events)
+        self.root.after(700, lambda: self.check_updates(silent=True))
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -697,7 +709,7 @@ class ServiceDependencyMapperGui:
             foreground=MUTED,
             font=("Segoe UI", 10),
         ).grid(row=1, column=1, sticky="nw")
-        tk.Label(
+        self.version_badge = tk.Label(
             header,
             text=f"v{__version__}",
             background=PANEL_ALT,
@@ -705,7 +717,15 @@ class ServiceDependencyMapperGui:
             padx=10,
             pady=5,
             font=("Consolas", 9, "bold"),
-        ).grid(row=0, column=2, rowspan=2, sticky="e")
+        )
+        self.version_badge.grid(row=0, column=2, sticky="e")
+        self.update_button = ttk.Button(
+            header,
+            text="Check for updates",
+            style="Secondary.TButton",
+            command=self.update_or_check,
+        )
+        self.update_button.grid(row=1, column=2, sticky="e", pady=(4, 0))
 
     def _build_controls(self, parent: ttk.Frame) -> None:
         panel = ttk.Frame(parent, style="Panel.TFrame", padding=16)
@@ -963,6 +983,195 @@ class ServiceDependencyMapperGui:
         self.root.bind("<F5>", lambda _event: self.run())
         self.root.bind("<Control-s>", lambda _event: self.export_json())
 
+    def update_or_check(self) -> None:
+        """Install an available update or perform a new manual check."""
+
+        if self.update_installed:
+            self.restart_gui()
+        elif self.latest_update and self.latest_update.update_available:
+            self.install_available_update()
+        else:
+            self.check_updates(silent=False)
+
+    def check_updates(self, *, silent: bool = False) -> None:
+        """Check the HTTPS version manifest without blocking the GUI thread."""
+
+        if (
+            self.update_check_running
+            or self.update_install_running
+            or self.update_installed
+        ):
+            return
+        self.update_check_running = True
+        self.update_button.configure(
+            text="Checking…",
+            style="Secondary.TButton",
+            state="disabled",
+        )
+
+        def worker() -> None:
+            try:
+                info = fetch_update_info(__version__)
+                self.events.put(("update_info", (info, silent)))
+            except Exception as exc:
+                self.events.put(
+                    (
+                        "update_check_error",
+                        (f"{type(exc).__name__}: {exc}", silent),
+                    )
+                )
+
+        threading.Thread(
+            target=worker,
+            name="sdmap-gui-update-check",
+            daemon=True,
+        ).start()
+
+    def _show_update_info(self, info: UpdateInfo, silent: bool) -> None:
+        self.update_check_running = False
+        self.latest_update = info
+        state = "disabled" if self.busy else "normal"
+        if info.update_available:
+            self.version_badge.configure(foreground=YELLOW)
+            self.update_button.configure(
+                text=f"Update to v{info.latest_version}",
+                style="Accent.TButton",
+                state=state,
+            )
+            if not silent:
+                self.install_available_update()
+            return
+
+        self.version_badge.configure(foreground=GREEN)
+        self.update_button.configure(
+            text="Up to date ✓",
+            style="Secondary.TButton",
+            state=state,
+        )
+        if not silent:
+            messagebox.showinfo(
+                "No updates available",
+                f"Service Dependency Mapper v{__version__} is up to date.",
+                parent=self.root,
+            )
+
+    def _show_update_check_error(self, message: str, silent: bool) -> None:
+        self.update_check_running = False
+        self.update_button.configure(
+            text="Check for updates",
+            style="Secondary.TButton",
+            state="disabled" if self.busy else "normal",
+        )
+        if not silent:
+            messagebox.showerror(
+                "Cannot check for updates",
+                message,
+                parent=self.root,
+            )
+
+    def install_available_update(self) -> None:
+        """Install a discovered update after explicit user confirmation."""
+
+        info = self.latest_update
+        if info is None or not info.update_available:
+            self.check_updates(silent=False)
+            return
+        if self.busy or self.update_install_running:
+            return
+
+        summary = f"\n\n{info.summary}" if info.summary else ""
+        confirmed = messagebox.askyesno(
+            "Install update",
+            (
+                f"Version {info.latest_version} is available "
+                f"(installed: {info.current_version}).{summary}\n\n"
+                "Install it now in the current Python environment?"
+            ),
+            parent=self.root,
+        )
+        if not confirmed:
+            return
+
+        self.update_install_running = True
+        self._set_busy(True)
+        self.update_button.configure(text="Installing update…", state="disabled")
+        self.status.set(f"Installing version {info.latest_version}…")
+
+        def worker() -> None:
+            try:
+                result = install_update()
+                self.events.put(("update_installed", result))
+            except Exception as exc:
+                self.events.put(
+                    (
+                        "update_install_error",
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                )
+
+        threading.Thread(
+            target=worker,
+            name="sdmap-gui-update-install",
+            daemon=True,
+        ).start()
+
+    def _show_update_installed(self, result: UpdateResult) -> None:
+        self.update_install_running = False
+        self.update_installed = True
+        self._set_busy(False)
+        latest = self.latest_update.latest_version if self.latest_update else "latest"
+        self.version_badge.configure(text=f"v{latest}", foreground=GREEN)
+        self.update_button.configure(
+            text="Restart now",
+            style="Accent.TButton",
+            command=self.restart_gui,
+            state="normal",
+        )
+        self.status.set(
+            f"Version {latest} installed using {result.method}. Restart required."
+        )
+        if messagebox.askyesno(
+            "Update installed",
+            f"Version {latest} was installed successfully.\n\nRestart the GUI now?",
+            parent=self.root,
+        ):
+            self.restart_gui()
+
+    def _show_update_install_error(self, message: str) -> None:
+        self.update_install_running = False
+        self._set_busy(False)
+        latest = self.latest_update.latest_version if self.latest_update else "latest"
+        self.update_button.configure(
+            text=f"Update to v{latest}",
+            style="Accent.TButton",
+            command=self.update_or_check,
+            state="normal",
+        )
+        self.status.set("Automatic update did not finish; review the error details.")
+        messagebox.showerror(
+            "Update failed safely",
+            message,
+            parent=self.root,
+        )
+
+    def restart_gui(self) -> None:
+        """Start the updated GUI in the same interpreter and close this one."""
+
+        command = [sys.executable, "-m", "service_dependency_mapper", "gui"]
+        selected = self.config_path.get().strip()
+        if selected:
+            command.append(selected)
+        try:
+            subprocess.Popen(command, cwd=str(Path.cwd()))
+        except OSError as exc:
+            messagebox.showerror(
+                "Cannot restart",
+                str(exc),
+                parent=self.root,
+            )
+            return
+        self._close()
+
     def browse(self) -> None:
         current = Path(self.config_path.get()).expanduser()
         initial_directory = current.parent if current.parent.exists() else Path.cwd()
@@ -1176,6 +1385,16 @@ class ServiceDependencyMapperGui:
                     self._show_discovery_error(str(payload))
                 elif event == "discovery_cancelled":
                     self._show_discovery_cancelled()
+                elif event == "update_info":
+                    info, silent = payload
+                    self._show_update_info(info, bool(silent))
+                elif event == "update_check_error":
+                    message, silent = payload
+                    self._show_update_check_error(str(message), bool(silent))
+                elif event == "update_installed":
+                    self._show_update_installed(payload)
+                elif event == "update_install_error":
+                    self._show_update_install_error(str(payload))
         except queue.Empty:
             pass
         self.root.after(100, self._poll_events)
@@ -1391,6 +1610,12 @@ class ServiceDependencyMapperGui:
         self.validate_button.configure(state=state)
         self.run_button.configure(state=state)
         self.path_entry.configure(state=state)
+        update_state = (
+            "disabled"
+            if busy or self.update_check_running or self.update_install_running
+            else "normal"
+        )
+        self.update_button.configure(state=update_state)
         if busy:
             self.progress.start(12)
             self.export_json_button.configure(state="disabled")
@@ -1483,6 +1708,13 @@ class ServiceDependencyMapperGui:
         self.status.set(f"{success} {destination}")
 
     def _close(self) -> None:
+        if self.update_install_running:
+            messagebox.showinfo(
+                "Update in progress",
+                "Wait for the update to finish before closing the application.",
+                parent=self.root,
+            )
+            return
         self.closed = True
         self.discovery_cancel.set()
         self.root.destroy()

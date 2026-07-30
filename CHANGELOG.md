@@ -2,6 +2,25 @@
 
 Wszystkie istotne zmiany w projekcie są dokumentowane w tym pliku.
 
+## [1.3.0] - 2026-07-30
+
+### Added
+
+- automatic non-blocking update check when the desktop GUI starts,
+- manual `Check for updates` action with a visible version state,
+- confirmed one-click installation into the current virtual environment,
+- safe source-checkout updates limited to a clean `main` branch and
+  `git pull --ff-only`,
+- restart action that reopens the selected service map after an update,
+- version manifest and updater unit-test coverage.
+
+### Fixed
+
+- Windows discovery no longer depends on the active ANSI code page when
+  decoding PowerShell, ARP, or other redirected command output,
+- missing subprocess output is handled as an empty result instead of causing
+  an `AttributeError` during discovery.
+
 ## [1.2.0] - 2026-07-30
 
 ### Added

@@ -357,6 +357,16 @@ class DiscoverySettings:
             raise ValueError("Discovery ports must be integers from 1 to 65535.")
 
 
+def _decode_command_output(value: bytes | str | None) -> str:
+    """Decode redirected command output without relying on Windows ANSI pages."""
+
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return value.decode("utf-8", errors="replace")
+
+
 def _run_command(command: list[str], timeout: float = 8) -> str:
     """Run a fixed system inventory command and return its output."""
 
@@ -368,18 +378,17 @@ def _run_command(command: list[str], timeout: float = 8) -> str:
     completed = subprocess.run(
         command,
         capture_output=True,
-        text=True,
         timeout=timeout,
         check=False,
         creationflags=creation_flags,
     )
     if completed.returncode != 0:
         return ""
-    return completed.stdout
+    return _decode_command_output(completed.stdout)
 
 
-def _as_json_list(value: str) -> list[dict[str, Any]]:
-    if not value.strip():
+def _as_json_list(value: str | None) -> list[dict[str, Any]]:
+    if not value or not value.strip():
         return []
     try:
         parsed = json.loads(value)
@@ -397,14 +406,17 @@ def _windows_interface_records() -> tuple[
     dict[str, str],
     list[dict[str, Any]],
 ]:
-    address_script = (
+    utf8_output = (
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+    )
+    address_script = utf8_output + (
         "Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
         "Where-Object { $_.AddressState -eq 'Preferred' -and "
         "$_.IPAddress -notlike '127.*' } | "
         "Select-Object InterfaceAlias,IPAddress,PrefixLength | "
         "ConvertTo-Json -Compress"
     )
-    route_script = (
+    route_script = utf8_output + (
         "Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
         "Sort-Object RouteMetric | "
         "Select-Object InterfaceAlias,DestinationPrefix,NextHop | "

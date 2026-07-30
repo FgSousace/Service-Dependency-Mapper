@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,8 @@ from service_dependency_mapper.discovery import (
     DiscoveryResult,
     DiscoverySettings,
     NetworkTarget,
+    _as_json_list,
+    _run_command,
     detect_local_networks,
     discover_infrastructure,
     discovery_to_document,
@@ -67,6 +70,23 @@ def discovery_fixture() -> DiscoveryResult:
 
 
 class DiscoveryParsingTests(unittest.TestCase):
+    @patch("service_dependency_mapper.discovery.subprocess.run")
+    def test_command_output_does_not_depend_on_windows_code_page(self, run):
+        run.return_value = subprocess.CompletedProcess(
+            ["inventory"],
+            0,
+            stdout=b'{"name":"device-\x88"}',
+            stderr=b"",
+        )
+
+        output = _run_command(["inventory"])
+
+        self.assertIn("\ufffd", output)
+        self.assertNotIn("text", run.call_args.kwargs)
+
+    def test_empty_subprocess_output_is_safe_for_json_parser(self):
+        self.assertEqual(_as_json_list(None), [])
+
     def test_parses_windows_and_linux_neighbor_rows(self):
         output = """
           192.168.10.1          aa-bb-cc-dd-ee-01     dynamic
