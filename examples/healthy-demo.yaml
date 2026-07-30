@@ -1,0 +1,37 @@
+version: 1
+
+service:
+  name: Example.com public service
+  description: A small healthy chain demonstrating DNS, TCP, and HTTP checks.
+
+defaults:
+  timeout: 4
+  workers: 4
+
+components:
+  - id: public_dns
+    name: Public DNS
+    check:
+      type: dns
+      target: example.com
+    tags: [network, dns]
+
+  - id: web_tls
+    name: Web TLS endpoint
+    depends_on: [public_dns]
+    check:
+      type: tcp
+      host: example.com
+      port: 443
+    tags: [network, frontend]
+
+  - id: web_page
+    name: Website
+    depends_on: [web_tls]
+    check:
+      type: http
+      url: https://example.com/
+      expected_status: [200]
+      contains: Example Domain
+    tags: [application, frontend]
+

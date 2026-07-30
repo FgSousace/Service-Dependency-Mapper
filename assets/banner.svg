@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420" role="img" aria-labelledby="title desc">
+  <title id="title">Service Dependency Mapper</title>
+  <desc id="desc">A dark network operations banner showing connected DNS, TCP, API, and database components.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0b1f2e"/>
+      <stop offset="1" stop-color="#071621"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M 44 0 L 0 0 0 44" fill="none" stroke="#7dd3fc" stroke-opacity=".045" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="420" rx="26" fill="url(#background)"/>
+  <rect width="1600" height="420" rx="26" fill="url(#grid)"/>
+  <circle cx="1270" cy="205" r="320" fill="url(#glow)"/>
+  <path d="M0 356 C310 315 450 408 760 352 S1260 282 1600 343 V420 H0Z" fill="#0f766e" opacity=".08"/>
+
+  <g font-family="Segoe UI, Inter, Arial, sans-serif">
+    <text x="92" y="135" fill="#a5f3fc" font-size="24" font-weight="700" letter-spacing="5">NOC DIAGNOSTICS</text>
+    <text x="88" y="205" fill="#f8fafc" font-size="58" font-weight="750">Service Dependency Mapper</text>
+    <rect x="91" y="229" width="680" height="5" rx="2.5" fill="url(#accent)"/>
+    <text x="92" y="283" fill="#b6c7d6" font-size="25">Health checks • dependency graphs • root-cause candidates</text>
+    <text x="92" y="329" fill="#6ee7b7" font-size="20" font-family="Consolas, monospace">DNS  →  TCP  →  HTTP  →  diagnosis</text>
+  </g>
+
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1010 126 L1166 126 L1302 210 L1440 210" fill="none" stroke="#22d3ee" stroke-opacity=".7" stroke-width="4"/>
+    <path d="M1166 126 L1166 295 L1302 295" fill="none" stroke="#34d399" stroke-opacity=".58" stroke-width="4"/>
+    <path d="M1302 295 L1440 210" fill="none" stroke="#34d399" stroke-opacity=".58" stroke-width="4"/>
+
+    <g filter="url(#soft-glow)">
+      <circle cx="1010" cy="126" r="8" fill="#22d3ee"/>
+      <circle cx="1166" cy="126" r="8" fill="#22d3ee"/>
+      <circle cx="1302" cy="210" r="8" fill="#22d3ee"/>
+      <circle cx="1440" cy="210" r="8" fill="#34d399"/>
+      <circle cx="1166" cy="295" r="8" fill="#34d399"/>
+      <circle cx="1302" cy="295" r="8" fill="#34d399"/>
+    </g>
+
+    <g font-family="Consolas, monospace" font-size="17" font-weight="700" text-anchor="middle">
+      <rect x="945" y="88" width="130" height="76" rx="14" fill="#0e2937" stroke="#22d3ee" stroke-width="2"/>
+      <text x="1010" y="132" fill="#cffafe">DNS</text>
+
+      <rect x="1101" y="88" width="130" height="76" rx="14" fill="#0e2937" stroke="#22d3ee" stroke-width="2"/>
+      <text x="1166" y="132" fill="#cffafe">TCP</text>
+
+      <rect x="1237" y="172" width="130" height="76" rx="14" fill="#0e2937" stroke="#22d3ee" stroke-width="2"/>
+      <text x="1302" y="216" fill="#cffafe">API</text>
+
+      <rect x="1375" y="172" width="130" height="76" rx="14" fill="#0b302d" stroke="#34d399" stroke-width="2"/>
+      <text x="1440" y="216" fill="#d1fae5">WEB</text>
+
+      <rect x="1101" y="257" width="130" height="76" rx="14" fill="#0b302d" stroke="#34d399" stroke-width="2"/>
+      <text x="1166" y="301" fill="#d1fae5">DB</text>
+
+      <rect x="1237" y="257" width="130" height="76" rx="14" fill="#0b302d" stroke="#34d399" stroke-width="2"/>
+      <text x="1302" y="301" fill="#d1fae5">CACHE</text>
+    </g>
+  </g>
+
+  <rect x="0" y="409" width="1600" height="11" rx="5" fill="url(#accent)" opacity=".8"/>
+</svg>
+

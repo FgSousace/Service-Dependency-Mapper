@@ -1,0 +1,36 @@
+version: 1
+
+service:
+  name: Simulated checkout outage
+  description: An intentionally broken dependency chain for root-cause analysis.
+
+defaults:
+  timeout: 2
+  workers: 4
+
+components:
+  - id: checkout_dns
+    name: Checkout DNS
+    check:
+      type: dns
+      target: checkout-does-not-exist.invalid
+    tags: [network, dns]
+
+  - id: checkout_tcp
+    name: Checkout TLS
+    depends_on: [checkout_dns]
+    check:
+      type: tcp
+      host: checkout-does-not-exist.invalid
+      port: 443
+    tags: [network, frontend]
+
+  - id: checkout_api
+    name: Checkout API
+    depends_on: [checkout_tcp]
+    check:
+      type: http
+      url: https://checkout-does-not-exist.invalid/health
+      expected_status: [200]
+    tags: [application, api]
+
