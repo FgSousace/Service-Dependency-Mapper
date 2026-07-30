@@ -1,5 +1,5 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "released": "2026-07-30",
-  "summary": "Automatic background update checks and a safe one-click GUI updater."
+  "summary": "Adaptive all-core parallelism for faster discovery and analysis."
 }

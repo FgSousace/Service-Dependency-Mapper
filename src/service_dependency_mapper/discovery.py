@@ -15,12 +15,17 @@ import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from service_dependency_mapper.performance import (
+    automatic_worker_count,
+    build_discovery_worker_plan,
+)
 
 PRIVATE_RANGES = (
     ipaddress.ip_network("10.0.0.0/8"),
@@ -329,6 +334,8 @@ class DiscoveryResult:
     networks: tuple[NetworkTarget, ...]
     hosts: tuple[DiscoveredHost, ...]
     warnings: tuple[str, ...] = ()
+    worker_count: int = 1
+    logical_processors: int = 1
 
     @property
     def service_count(self) -> int:
@@ -342,7 +349,7 @@ class DiscoverySettings:
     """Safe bounds and concurrency settings for a discovery run."""
 
     timeout: float = 0.3
-    workers: int = 96
+    workers: int = field(default_factory=lambda: automatic_worker_count("discovery"))
     max_hosts_per_network: int = 1022
     ports: tuple[int, ...] = DEFAULT_SCAN_PORTS
 
@@ -937,14 +944,16 @@ def _run_parallel(
 ) -> list[Any]:
     if total <= 0:
         return []
+    effective_workers = max(1, min(workers, total))
     results: list[Any] = []
     completed = 0
     iterator = iter(items)
     with ThreadPoolExecutor(
-        max_workers=workers, thread_name_prefix="sdmap-discovery"
+        max_workers=effective_workers,
+        thread_name_prefix="sdmap-discovery",
     ) as pool:
         pending: set[Future[Any]] = set()
-        for _ in range(min(total, workers * 4)):
+        for _ in range(min(total, effective_workers * 4)):
             try:
                 item = next(iterator)
             except StopIteration:
@@ -984,6 +993,7 @@ def discover_infrastructure(
     """Discover connected private networks, hosts, and generic TCP services."""
 
     settings = settings or DiscoverySettings()
+    worker_plan = build_discovery_worker_plan(settings.workers)
     started_clock = time.perf_counter()
     started_at = datetime.now(UTC).isoformat()
     targets = networks or detect_local_networks(settings.max_hosts_per_network)
@@ -1003,11 +1013,21 @@ def discover_infrastructure(
             "The selected networks do not contain usable host addresses."
         )
 
+    _emit_progress(
+        progress,
+        "performance",
+        0,
+        len(addresses),
+        (
+            f"Using {worker_plan.tcp_workers} I/O workers across "
+            f"{worker_plan.logical_processors} logical processors…"
+        ),
+    )
     ping_results = _run_parallel(
         lambda address: (address, _ping_host(address, settings.timeout)),
         addresses,
         total=len(addresses),
-        workers=settings.workers,
+        workers=worker_plan.icmp_workers,
         progress=progress,
         stage="hosts",
         message="Probing hosts with ICMP…",
@@ -1035,7 +1055,7 @@ def discover_infrastructure(
         ),
         discovery_tasks,
         total=len(discovery_tasks),
-        workers=settings.workers,
+        workers=worker_plan.tcp_workers,
         progress=progress,
         stage="hosts",
         message="Finding hosts that block ICMP…",
@@ -1065,7 +1085,7 @@ def discover_infrastructure(
         ),
         remaining_tasks,
         total=remaining_total,
-        workers=settings.workers,
+        workers=worker_plan.tcp_workers,
         progress=progress,
         stage="services",
         message="Scanning generic TCP services…",
@@ -1078,7 +1098,7 @@ def discover_infrastructure(
         lambda address: (address, _resolve_hostname(address)),
         sorted_alive,
         total=len(sorted_alive),
-        workers=min(settings.workers, 32),
+        workers=worker_plan.resolver_workers,
         progress=progress,
         stage="identity",
         message="Resolving host names…",
@@ -1098,7 +1118,7 @@ def discover_infrastructure(
         ),
         service_tasks,
         total=len(service_tasks),
-        workers=min(settings.workers, 48),
+        workers=worker_plan.fingerprint_workers,
         progress=progress,
         stage="fingerprint",
         message="Identifying discovered services…",
@@ -1149,6 +1169,8 @@ def discover_infrastructure(
         networks=targets,
         hosts=hosts,
         warnings=warnings,
+        worker_count=worker_plan.tcp_workers,
+        logical_processors=worker_plan.logical_processors,
     )
 
 
@@ -1269,7 +1291,7 @@ def discovery_to_document(result: DiscoveryResult) -> dict[str, Any]:
                 "Vendor-neutral map generated from connected private IPv4 networks."
             ),
         },
-        "defaults": {"timeout": 2, "workers": 32},
+        "defaults": {"timeout": 2, "workers": "auto"},
         "discovery": {
             "started_at": result.started_at,
             "completed_at": result.completed_at,
@@ -1277,6 +1299,10 @@ def discovery_to_document(result: DiscoveryResult) -> dict[str, Any]:
             "networks": [network.network for network in result.networks],
             "hosts": len(result.hosts),
             "services": result.service_count,
+            "performance": {
+                "workers": result.worker_count,
+                "logical_processors": result.logical_processors,
+            },
             "warnings": list(result.warnings),
             "inventory": [
                 {

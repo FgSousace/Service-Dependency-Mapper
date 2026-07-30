@@ -2,6 +2,32 @@
 
 Wszystkie istotne zmiany w projekcie są dokumentowane w tym pliku.
 
+## [1.4.0] - 2026-07-30
+
+### Added
+
+- adaptive `Auto` parallelism based on the logical processors available to the
+  running process,
+- stage-specific discovery scheduling for ICMP, TCP, reverse DNS, and service
+  fingerprinting,
+- automatic analysis concurrency with support for `workers: auto`,
+- `auto` support for GUI, YAML, `sdmap check --workers`, and
+  `sdmap discover --workers`,
+- GUI performance hint and completed-scan worker/CPU telemetry,
+- generated inventory metadata describing the worker count and logical CPUs.
+
+### Changed
+
+- automatic discovery now scales from 32 up to 256 concurrent I/O workers,
+- explicit worker limits now accept values from 1 to 256,
+- parallel executors are bounded by the number of actual tasks,
+- generated maps and new GUI templates use automatic parallelism by default.
+
+### Fixed
+
+- ICMP analysis no longer starts text-mode subprocess readers that can fail on
+  incompatible Windows code pages.
+
 ## [1.3.0] - 2026-07-30
 
 ### Added

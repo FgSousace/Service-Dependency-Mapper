@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import yaml
 
 from service_dependency_mapper.models import Component, DependencyMap
+from service_dependency_mapper.performance import resolve_worker_count
 
 _COMPONENT_ID = re.compile(r"^[a-z][a-z0-9_-]*$")
 _CHECK_TYPES = {"dns", "http", "icmp", "none", "tcp", "tls"}
@@ -203,20 +204,26 @@ def load_config(
 
     defaults = _mapping(root.get("defaults", {}), "defaults")
     default_timeout = _positive_number(defaults.get("timeout", 3), "defaults.timeout")
-    workers = defaults.get("workers", 8)
-    if (
-        isinstance(workers, bool)
-        or not isinstance(workers, int)
-        or not 1 <= workers <= 64
-    ):
-        raise ConfigError("defaults.workers must be an integer from 1 to 64.")
+    try:
+        workers = resolve_worker_count(
+            defaults.get("workers", "auto"),
+            workload="analysis",
+            location="defaults.workers",
+        )
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
     if timeout_override is not None:
         default_timeout = _positive_number(timeout_override, "--timeout")
     if workers_override is not None:
-        if not 1 <= workers_override <= 64:
-            raise ConfigError("--workers must be an integer from 1 to 64.")
-        workers = workers_override
+        try:
+            workers = resolve_worker_count(
+                workers_override,
+                workload="analysis",
+                location="--workers",
+            )
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
 
     raw_components = root.get("components")
     if not isinstance(raw_components, list) or not raw_components:

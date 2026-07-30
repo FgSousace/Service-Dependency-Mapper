@@ -66,6 +66,8 @@ def discovery_fixture() -> DiscoveryResult:
         duration_ms=2000,
         networks=(network,),
         hosts=hosts,
+        worker_count=128,
+        logical_processors=8,
     )
 
 
@@ -166,6 +168,8 @@ class DiscoveryMapTests(unittest.TestCase):
 
         self.assertEqual(document["discovery"]["hosts"], 2)
         self.assertEqual(document["discovery"]["services"], 3)
+        self.assertEqual(document["discovery"]["performance"]["workers"], 128)
+        self.assertEqual(document["defaults"]["workers"], "auto")
         self.assertIn("protocol: https", rendered)
         self.assertIn("protocol: ssh", rendered)
 
@@ -227,6 +231,7 @@ class DiscoveryMapTests(unittest.TestCase):
         self.assertTrue(by_address["192.168.50.1"].ping_responded)
         self.assertTrue(by_address["192.168.50.2"].is_gateway)
         self.assertEqual(by_address["192.168.50.2"].services[0].port, 22)
+        self.assertEqual(result.worker_count, 4)
 
 
 class DiscoveryCliTests(unittest.TestCase):
@@ -245,7 +250,11 @@ class DiscoveryCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(dependency_map.service_name, "Discovered infrastructure")
         self.assertIn("2 host(s), 3 service(s)", stdout.getvalue())
+        self.assertIn("128 worker(s)", stdout.getvalue())
         discover.assert_called_once()
+        settings = discover.call_args.kwargs["settings"]
+        self.assertGreaterEqual(settings.workers, 32)
+        self.assertLessEqual(settings.workers, 256)
 
 
 if __name__ == "__main__":

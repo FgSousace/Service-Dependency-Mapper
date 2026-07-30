@@ -23,7 +23,7 @@
   <circle cx="68" cy="51" r="6" fill="#fb7185"/>
   <circle cx="89" cy="51" r="6" fill="#fbbf24"/>
   <circle cx="110" cy="51" r="6" fill="#34d399"/>
-  <text x="700" y="57" fill="#93a9b8" font-family="Segoe UI, Arial" font-size="14" text-anchor="middle">Service Dependency Mapper 1.3.0</text>
+  <text x="700" y="57" fill="#93a9b8" font-family="Segoe UI, Arial" font-size="14" text-anchor="middle">Service Dependency Mapper 1.4.0</text>
 
   <g font-family="Segoe UI, Arial">
     <rect x="72" y="98" width="44" height="44" rx="6" fill="none" stroke="#22d3ee" stroke-width="2"/>
@@ -33,7 +33,7 @@
     <text x="132" y="119" fill="#e5f0f7" font-size="25" font-weight="700">SERVICE DEPENDENCY MAPPER</text>
     <text x="132" y="140" fill="#93a9b8" font-size="14">Vendor-neutral diagnostics for any host, service, port, URL, or certificate</text>
     <rect x="1248" y="91" width="76" height="27" rx="5" fill="#102636"/>
-    <text x="1286" y="110" fill="#34d399" font-family="Consolas, monospace" font-size="12" font-weight="700" text-anchor="middle">v1.3.0</text>
+    <text x="1286" y="110" fill="#34d399" font-family="Consolas, monospace" font-size="12" font-weight="700" text-anchor="middle">v1.4.0</text>
     <rect x="1192" y="124" width="132" height="27" rx="5" fill="#102636" stroke="#1e3a4a"/>
     <text x="1258" y="142" fill="#e5f0f7" font-size="11" font-weight="600" text-anchor="middle">Up to date ✓</text>
 
@@ -53,7 +53,7 @@
       <rect x="1050" y="204" width="254" height="38" rx="5" fill="url(#run)"/>
       <text x="1177" y="228" fill="#07111f">Run analysis</text>
     </g>
-    <text x="92" y="261" fill="#93a9b8" font-size="12">Optional overrides     Timeout: 3.0     Workers: 8</text>
+    <text x="92" y="261" fill="#93a9b8" font-size="12">Optional overrides     Timeout: 0.3     Parallelism: Auto     256 scan workers / 16 logical CPUs</text>
 
     <g>
       <rect x="72" y="294" width="302" height="76" rx="8" fill="#0d1d2b" stroke="#1e3a4a"/>

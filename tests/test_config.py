@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from service_dependency_mapper.config import (
     ConfigError,
@@ -65,6 +66,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(service_map.default_timeout, 9)
         self.assertTrue(all(item.timeout == 9 for item in service_map.components))
         self.assertEqual(service_map.workers, 2)
+
+    @patch(
+        "service_dependency_mapper.performance.logical_processor_count",
+        return_value=6,
+    )
+    def test_resolves_auto_worker_setting(self, _processor_count):
+        content = VALID_CONFIG.replace("workers: 3", "workers: auto")
+        service_map = self.load_text(content)
+        self.assertEqual(service_map.workers, 24)
 
     def test_component_timeout_overrides_default(self):
         content = VALID_CONFIG.replace(

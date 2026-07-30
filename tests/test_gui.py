@@ -70,8 +70,19 @@ class GuiHelperTests(unittest.TestCase):
     def test_parses_worker_count(self):
         self.assertEqual(parse_workers("12"), 12)
 
+    @patch(
+        "service_dependency_mapper.performance.logical_processor_count",
+        return_value=16,
+    )
+    def test_parses_auto_workers_for_each_workload(self, _processor_count):
+        self.assertEqual(parse_workers("Auto"), 64)
+        self.assertEqual(
+            parse_workers("Auto", workload="discovery"),
+            256,
+        )
+
     def test_rejects_invalid_worker_count(self):
-        for value in ("1.5", "0", "65"):
+        for value in ("1.5", "0", "257"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_workers(value)
 

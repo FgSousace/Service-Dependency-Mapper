@@ -19,7 +19,21 @@ from service_dependency_mapper.discovery import (
 )
 from service_dependency_mapper.graph import render_dot, render_mermaid
 from service_dependency_mapper.models import OverallStatus
+from service_dependency_mapper.performance import resolve_worker_count
 from service_dependency_mapper.reporting import render_json, render_table
+
+
+def _workers_argument(value: str) -> int | str:
+    if value.strip().lower() == "auto":
+        return "auto"
+    try:
+        return resolve_worker_count(
+            value,
+            workload="analysis",
+            location="--workers",
+        )
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -48,7 +62,9 @@ def _parser() -> argparse.ArgumentParser:
         "--timeout", type=float, help="Override the default timeout for every check."
     )
     check.add_argument(
-        "--workers", type=int, help="Override concurrent workers (1-64)."
+        "--workers",
+        type=_workers_argument,
+        help="Override concurrent workers: auto or 1-256.",
     )
     check.add_argument(
         "--no-color", action="store_true", help="Disable ANSI colors in table output."
@@ -99,9 +115,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     discover.add_argument(
         "--workers",
-        type=int,
-        default=96,
-        help="Concurrent discovery workers from 1 to 256 (default: 96).",
+        type=_workers_argument,
+        default="auto",
+        help="Concurrent discovery workers: auto or 1-256 (default: auto).",
     )
     discover.add_argument(
         "--max-hosts",
@@ -173,9 +189,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "discover":
+            discovery_workers = resolve_worker_count(
+                args.workers,
+                workload="discovery",
+                location="--workers",
+            )
             settings = DiscoverySettings(
                 timeout=args.timeout,
-                workers=args.workers,
+                workers=discovery_workers,
                 max_hosts_per_network=args.max_hosts,
             )
             networks = (
@@ -192,15 +213,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"Discovery complete: {len(result.hosts)} host(s), "
                 f"{result.service_count} service(s)."
             )
+            print(
+                f"Performance: {result.worker_count} worker(s), "
+                f"{result.logical_processors} logical processor(s)."
+            )
             print(f"Saved: {output}")
             for warning in result.warnings:
                 print(f"Safety note: {warning}", file=sys.stderr)
             return 0
 
+        analysis_workers = (
+            resolve_worker_count(
+                args.workers,
+                workload="analysis",
+                location="--workers",
+            )
+            if args.workers is not None
+            else None
+        )
         dependency_map = load_config(
             args.config,
             timeout_override=args.timeout,
-            workers_override=args.workers,
+            workers_override=analysis_workers,
         )
         report = analyze(dependency_map)
         if args.format == "json":

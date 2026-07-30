@@ -20,6 +20,7 @@ from service_dependency_mapper.config import ConfigError, load_config, topologic
 from service_dependency_mapper.discovery import (
     DiscoveryError,
     DiscoveryResult,
+    DiscoverySettings,
     default_discovery_output,
     discover_infrastructure,
     host_component_id,
@@ -32,6 +33,13 @@ from service_dependency_mapper.models import (
     AnalyzedResult,
     Component,
     DependencyMap,
+)
+from service_dependency_mapper.performance import (
+    Workload,
+    automatic_worker_count,
+    build_discovery_worker_plan,
+    logical_processor_count,
+    resolve_worker_count,
 )
 from service_dependency_mapper.reporting import render_json
 from service_dependency_mapper.topology import build_topology_layout
@@ -61,7 +69,7 @@ service:
 
 defaults:
   timeout: 3
-  workers: 8
+  workers: auto
 
 components:
   - id: gateway_ping
@@ -124,19 +132,21 @@ def parse_timeout(value: str) -> float | None:
     return parsed
 
 
-def parse_workers(value: str) -> int | None:
+def parse_workers(
+    value: str,
+    *,
+    workload: Workload = "analysis",
+) -> int | None:
     """Parse an optional worker count accepted by the configuration loader."""
 
     value = value.strip()
     if not value:
         return None
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise ValueError("Workers must be an integer from 1 to 64.") from exc
-    if not 1 <= parsed <= 64:
-        raise ValueError("Workers must be an integer from 1 to 64.")
-    return parsed
+    return resolve_worker_count(
+        value,
+        workload=workload,
+        location="Workers",
+    )
 
 
 def result_row(item: AnalyzedResult) -> tuple[str, str, str, str, str, str]:
@@ -553,7 +563,7 @@ class ServiceDependencyMapperGui:
             value=str(Path(config_path)) if config_path else ""
         )
         self.timeout = tk.StringVar()
-        self.workers = tk.StringVar()
+        self.workers = tk.StringVar(value="Auto")
         self.status = tk.StringVar(
             value=(
                 "Select a YAML map or discover the connected infrastructure "
@@ -795,7 +805,7 @@ class ServiceDependencyMapperGui:
         )
         tk.Label(
             options,
-            text="Workers:",
+            text="Parallelism:",
             background=PANEL,
             foreground=MUTED,
             font=("Segoe UI", 9),
@@ -803,6 +813,16 @@ class ServiceDependencyMapperGui:
         ttk.Entry(options, textvariable=self.workers, width=8).pack(
             side="left", padx=(6, 0)
         )
+        tk.Label(
+            options,
+            text=(
+                f"Auto: {automatic_worker_count('discovery')} scan workers / "
+                f"{logical_processor_count()} logical CPUs"
+            ),
+            background=PANEL,
+            foreground=MUTED,
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(12, 0))
 
     def _build_summary(self, parent: ttk.Frame) -> None:
         summary = tk.Frame(parent, background=BACKGROUND)
@@ -1220,6 +1240,29 @@ class ServiceDependencyMapperGui:
 
         if self.busy:
             return
+        try:
+            timeout = parse_timeout(self.timeout.get()) or 0.3
+            workers = parse_workers(
+                self.workers.get(),
+                workload="discovery",
+            )
+            settings = DiscoverySettings(
+                timeout=timeout,
+                workers=(
+                    workers
+                    if workers is not None
+                    else automatic_worker_count("discovery")
+                ),
+            )
+        except ValueError as exc:
+            self.status.set("Cannot start infrastructure discovery.")
+            messagebox.showerror(
+                "Invalid performance settings",
+                str(exc),
+                parent=self.root,
+            )
+            return
+        worker_plan = build_discovery_worker_plan(settings.workers)
         self.discovery_cancel.clear()
         self.current_report = None
         self.current_discovery = None
@@ -1235,7 +1278,10 @@ class ServiceDependencyMapperGui:
         self.component_count.set("0")
         self.duration.set("—")
         self.overall_value_label.configure(foreground=CYAN)
-        self.status.set("Detecting connected private IPv4 networks…")
+        self.status.set(
+            f"Preparing {worker_plan.tcp_workers} I/O workers across "
+            f"{worker_plan.logical_processors} logical processors…"
+        )
 
         def progress(stage: str, completed: int, total: int, message: str) -> None:
             self.events.put(
@@ -1253,6 +1299,7 @@ class ServiceDependencyMapperGui:
         def worker() -> None:
             try:
                 result = discover_infrastructure(
+                    settings=settings,
                     progress=progress,
                     cancel_event=self.discovery_cancel,
                 )
@@ -1454,6 +1501,8 @@ class ServiceDependencyMapperGui:
         self.status.set(
             f"Discovery complete: {len(result.hosts)} host(s), "
             f"{result.service_count} service(s). "
+            f"{result.worker_count} workers / "
+            f"{result.logical_processors} logical CPUs. "
             f"Map saved as {destination.name}.{warning}"
         )
         self._enable_graph_exports(True)

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml"><img src="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
-  <img src="https://img.shields.io/badge/version-1.3.0-22c55e" alt="Version 1.3.0">
+  <img src="https://img.shields.io/badge/version-1.4.0-22c55e" alt="Version 1.4.0">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/discovery-IPv4%20LAN%20%7C%20VPN-22d3ee" alt="IPv4 LAN and VPN discovery">
   <img src="https://img.shields.io/badge/checks-ICMP%20%7C%20DNS%20%7C%20TCP%20%7C%20TLS%20%7C%20HTTP-06b6d4" alt="ICMP DNS TCP TLS HTTP">
@@ -22,6 +22,7 @@
   <a href="#%EF%B8%8F-graficzny-interfejs">GUI</a> •
   <a href="#-automatyczne-wykrywanie">Discovery</a> •
   <a href="#-automatyczne-aktualizacje">Aktualizacje</a> •
+  <a href="#-adaptacyjna-wydajność">Wydajność</a> •
   <a href="#-jak-to-działa">Jak to działa</a> •
   <a href="#%EF%B8%8F-konfiguracja">Konfiguracja</a> •
   <a href="#-polecenia">Polecenia</a> •
@@ -63,6 +64,7 @@ szybciej rozpocząć właściwą eskalację.
 | 🧩 Mapa zależności | Definiowanie dowolnych łańcuchów i rozgałęzień w YAML |
 | 🖥️ Desktop GUI | Discovery, wybór mapy, wizualizacja, analiza i eksport bez wpisywania komend |
 | 🔄 Bezpieczne aktualizacje | Automatyczne sprawdzanie wersji i aktualizacja z GUI po potwierdzeniu |
+| ⚡ Adaptacyjna wydajność | Tryb Auto skaluje zadania sieciowe i analizę do wszystkich logicznych procesorów |
 | 📡 Kontrole ICMP | Sprawdzanie osiągalności hostów przez systemowe polecenie ping |
 | 🌐 Kontrole DNS | Rozwiązywanie nazw i opcjonalna weryfikacja oczekiwanych adresów |
 | 🔌 Kontrole TCP | Sprawdzanie dostępności portu z limitem czasu |
@@ -127,6 +129,7 @@ GUI umożliwia:
 
 - automatyczne sprawdzenie dostępności nowej wersji po uruchomieniu,
 - bezpieczną instalację aktualizacji i restart aplikacji jednym przyciskiem,
+- automatyczny dobór równoległości do procesora albo ręczny limit `1–256`,
 - automatyczne wykrycie bieżącej infrastruktury jednym przyciskiem,
 - anulowanie dłuższego skanowania bez zamrażania okna,
 - otwarcie interaktywnej mapy całej wykrytej topologii,
@@ -166,6 +169,33 @@ Updater nigdy nie nadpisuje lokalnych modyfikacji i nie instaluje aktualizacji
 bez potwierdzenia użytkownika. Przycisk umożliwia też ręczne ponowienie
 sprawdzenia wersji. W instalacji bez lokalnego checkoutu aktualizowany jest
 pakiet z oficjalnego repozytorium w bieżącym środowisku Pythona.
+
+## ⚡ Adaptacyjna wydajność
+
+Pole **Parallelism** w GUI ma domyślną wartość `Auto`. Program odczytuje liczbę
+logicznych procesorów dostępnych dla procesu i dobiera osobne limity dla
+każdego rodzaju pracy:
+
+| Etap | Automatyczna równoległość |
+|---|---:|
+| Wykrywanie TCP i skan portów | `16 × liczba logicznych CPU`, maks. 256 |
+| ICMP | `4 × liczba logicznych CPU` |
+| Reverse DNS | `2 × liczba logicznych CPU`, maks. 64 |
+| Fingerprinting usług | `4 × liczba logicznych CPU`, maks. 96 |
+| Analiza mapy | `4 × liczba logicznych CPU`, maks. 256 |
+
+Przykładowo procesor z 16 wątkami logicznymi otrzyma do 256 równoległych prób
+TCP, 64 zadania ICMP/fingerprintingu oraz 32 resolvery DNS. Zadania są
+rozkładane przez system operacyjny na wszystkie dostępne procesory.
+
+Discovery jest przede wszystkim operacją wejścia/wyjścia: większość czasu
+oczekuje na odpowiedzi urządzeń lub timeouty. Dlatego niskie użycie CPU nie
+oznacza, że program działa jednowątkowo. Sztuczne utrzymywanie 100% obciążenia
+nie przyspieszyłoby sieci, a jedynie zwiększyłoby temperaturę i zużycie
+energii.
+
+W razie ograniczeń routera, firewalla lub systemu EDR można zamiast `Auto`
+wpisać własną wartość od `1` do `256`.
 
 ## 🔎 Automatyczne wykrywanie
 
@@ -282,7 +312,7 @@ service:
 
 defaults:
   timeout: 3
-  workers: 8
+  workers: auto
 
 components:
   - id: public_dns
@@ -342,7 +372,7 @@ sdmap gui
 ### Automatyczne wykrywanie infrastruktury
 
 ```powershell
-sdmap discover --output discovered-infrastructure.yaml
+sdmap discover --workers auto --output discovered-infrastructure.yaml
 ```
 
 ### Uruchomienie kontroli
@@ -360,7 +390,7 @@ sdmap check examples\infrastructure-stack.yaml --format json --output reports\no
 ### Nadpisanie czasu i współbieżności
 
 ```powershell
-sdmap check service.yaml --timeout 5 --workers 12
+sdmap check service.yaml --timeout 5 --workers auto
 ```
 
 ### Walidacja bez połączeń sieciowych
@@ -392,8 +422,9 @@ sdmap graph service.yaml --format dot --output service-map.dot
 
 ## 🧪 Testy i jakość
 
-Projekt ma **75 testów jednostkowych** obejmujących:
+Projekt ma **85 testów jednostkowych** obejmujących:
 
+- dobór workerów do liczby logicznych CPU i limity poszczególnych etapów,
 - sprawdzanie wersji, ochronę lokalnych zmian i przebieg aktualizacji,
 - bezpieczne dekodowanie wyników poleceń na Windowsie niezależnie od strony kodowej,
 - wykrywanie interfejsów i bezpieczne ograniczanie dużych podsieci,
@@ -441,6 +472,7 @@ Service-Dependency-Mapper/
 │   ├── graph.py
 │   ├── gui.py
 │   ├── models.py
+│   ├── performance.py
 │   ├── reporting.py
 │   ├── topology.py
 │   └── updater.py

@@ -148,7 +148,6 @@ def check_icmp(component: Component) -> CheckResult:
         completed = subprocess.run(
             command,
             capture_output=True,
-            text=True,
             timeout=(component.timeout * count) + 1,
             check=False,
             creationflags=creation_flags,
