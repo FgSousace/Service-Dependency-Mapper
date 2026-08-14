@@ -295,7 +295,8 @@ def _validate_installer_url(url: str) -> None:
         or not parsed.path.lower().endswith(".exe")
     ):
         raise UpdateError(
-            "The update manifest does not point to an official GitHub release installer."
+            "The update manifest does not point to an official "
+            "GitHub release installer."
         )
 
 
@@ -324,16 +325,20 @@ def _download_installer(
     open_url = opener or urllib.request.urlopen
     total = 0
     try:
-        with open_url(request, timeout=INSTALLER_TIMEOUT) as response:
-            with destination.open("wb") as output:
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > MAX_INSTALLER_BYTES:
-                        raise UpdateError("The downloaded installer is unexpectedly large.")
-                    output.write(chunk)
+        with (
+            open_url(request, timeout=INSTALLER_TIMEOUT) as response,
+            destination.open("wb") as output,
+        ):
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_INSTALLER_BYTES:
+                    raise UpdateError(
+                        "The downloaded installer is unexpectedly large."
+                    )
+                output.write(chunk)
     except UpdateError:
         destination.unlink(missing_ok=True)
         raise
