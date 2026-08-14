@@ -13,6 +13,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/FgSousace/Service-Dependency-Mapper/releases/download/v1.6.0/Service-Dependency-Mapper-Setup-1.6.0.exe">
+    <img src="https://img.shields.io/badge/POBIERZ_INSTALATOR_WINDOWS-.EXE-22c55e?style=for-the-badge&logo=windows11&logoColor=white" alt="Pobierz instalator Service Dependency Mapper dla Windows">
+  </a>
+</p>
+
+<p align="center">
   <strong>Automatyczne wykrywanie infrastruktury, interaktywna topologia i szybkie wskazywanie pierwotnej przyczyny awarii.</strong><br>
   Vendor-neutral • One-click discovery • Visual topology • Active health checks
 </p>
