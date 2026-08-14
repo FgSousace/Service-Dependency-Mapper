@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -23,6 +24,8 @@ UPDATE_MANIFEST_URL = (
 )
 PACKAGE_SOURCE = f"git+{REPOSITORY_URL}.git@{DEFAULT_BRANCH}"
 MAX_MANIFEST_BYTES = 64 * 1024
+MAX_INSTALLER_BYTES = 256 * 1024 * 1024
+INSTALLER_TIMEOUT = 60.0
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -40,6 +43,7 @@ class UpdateInfo:
     update_available: bool
     summary: str
     repository_url: str = REPOSITORY_URL
+    installer_url: str | None = None
 
     @property
     def versions_match(self) -> bool:
@@ -137,6 +141,9 @@ def fetch_update_info(
         raise UpdateError("The update manifest does not contain a version.")
     if not isinstance(summary, str):
         raise UpdateError("The update manifest contains an invalid summary.")
+    installer_url = document.get("installer_url")
+    if installer_url is not None and not isinstance(installer_url, str):
+        raise UpdateError("The update manifest contains an invalid installer URL.")
     try:
         update_available = is_newer_version(latest_version, current_version)
     except ValueError as exc:
@@ -147,6 +154,7 @@ def fetch_update_info(
         latest_version=latest_version.strip().lstrip("vV"),
         update_available=update_available,
         summary=summary.strip()[:500],
+        installer_url=installer_url.strip() if installer_url else None,
     )
 
 
@@ -265,13 +273,115 @@ def _update_source_checkout(
     )
 
 
+
+def installer_download_url(version: str) -> str:
+    """Return the official release asset URL for an installer version."""
+
+    normalized_version = version.strip().lstrip("vV")
+    version_key(normalized_version)
+    filename = f"Service-Dependency-Mapper-Setup-{normalized_version}.exe"
+    return (
+        f"{REPOSITORY_URL}/releases/download/v{normalized_version}/{filename}"
+    )
+
+
+def _validate_installer_url(url: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    expected_prefix = f"/{REPOSITORY_SLUG}/releases/download/"
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != "github.com"
+        or not parsed.path.startswith(expected_prefix)
+        or not parsed.path.lower().endswith(".exe")
+    ):
+        raise UpdateError(
+            "The update manifest does not point to an official GitHub release installer."
+        )
+
+
+def _download_installer(
+    version: str,
+    installer_url: str | None,
+    *,
+    opener: Callable[..., Any] | None = None,
+) -> Path:
+    """Download an official Windows installer with a strict size limit."""
+
+    url = installer_url or installer_download_url(version)
+    _validate_installer_url(url)
+    normalized_version = version.strip().lstrip("vV")
+    destination = Path(tempfile.gettempdir()) / (
+        f"Service-Dependency-Mapper-Setup-{normalized_version}.exe"
+    )
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/octet-stream",
+            "Cache-Control": "no-cache",
+            "User-Agent": f"Service-Dependency-Mapper/{normalized_version}",
+        },
+    )
+    open_url = opener or urllib.request.urlopen
+    total = 0
+    try:
+        with open_url(request, timeout=INSTALLER_TIMEOUT) as response:
+            with destination.open("wb") as output:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_INSTALLER_BYTES:
+                        raise UpdateError("The downloaded installer is unexpectedly large.")
+                    output.write(chunk)
+    except UpdateError:
+        destination.unlink(missing_ok=True)
+        raise
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        destination.unlink(missing_ok=True)
+        raise UpdateError(f"Could not download the Windows installer: {exc}") from exc
+    if total == 0:
+        destination.unlink(missing_ok=True)
+        raise UpdateError("The downloaded Windows installer is empty.")
+    return destination
+
+
+def _launch_windows_installer(
+    version: str,
+    installer_url: str | None,
+) -> UpdateResult:
+    installer = _download_installer(version, installer_url)
+    try:
+        subprocess.Popen(
+            [str(installer), "/SP-", "/CLOSEAPPLICATIONS"],
+            cwd=str(installer.parent),
+        )
+    except OSError as exc:
+        raise UpdateError(f"Could not launch the Windows installer: {exc}") from exc
+    return UpdateResult(
+        method="Windows installer",
+        output=f"Launched {installer}",
+    )
+
+
 def install_update(
     *,
     project_root: str | Path | None = None,
     runner: CommandRunner | None = None,
     python_executable: str | None = None,
+    latest_version: str | None = None,
+    installer_url: str | None = None,
+    frozen: bool | None = None,
 ) -> UpdateResult:
-    """Install the latest main-branch version without overwriting local work."""
+    """Install an update using the method appropriate for this distribution."""
+
+    frozen_installation = (
+        bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    )
+    if frozen_installation:
+        if latest_version is None:
+            raise UpdateError("The Windows installer version is missing.")
+        return _launch_windows_installer(latest_version, installer_url)
 
     command_runner = runner or subprocess.run
     executable = python_executable or sys.executable
