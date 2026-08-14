@@ -1160,16 +1160,17 @@ class ServiceDependencyMapperGui:
             return
 
         summary = f"\n\n{info.summary}" if info.summary else ""
+        install_prompt = (
+            "Download and open the Windows installer now?"
+            if getattr(sys, "frozen", False)
+            else "Install it now in the current Python environment?"
+        )
         confirmed = messagebox.askyesno(
             "Install update",
             (
                 f"Version {info.latest_version} is available "
                 f"(installed: {info.current_version}).{summary}\n\n"
-                (
-                    "Download and open the Windows installer now?"
-                    if getattr(sys, "frozen", False)
-                    else "Install it now in the current Python environment?"
-                )
+                f"{install_prompt}"
             ),
             parent=self.root,
         )
