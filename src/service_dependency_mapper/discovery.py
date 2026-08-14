@@ -10,6 +10,7 @@ import re
 import socket
 import ssl
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -423,7 +424,7 @@ def _run_command(command: list[str], timeout: float = 8) -> str:
 
     creation_flags = (
         getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        if platform.system() == "Windows"
+        if sys.platform == "win32"
         else 0
     )
     completed = subprocess.run(
