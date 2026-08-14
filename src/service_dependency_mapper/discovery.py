@@ -423,9 +423,7 @@ def _run_command(command: list[str], timeout: float = 8) -> str:
     """Run a fixed system inventory command and return its output."""
 
     creation_flags = (
-        getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        if sys.platform == "win32"
-        else 0
+        getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     )
     completed = subprocess.run(
         command,
