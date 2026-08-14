@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1081,7 +1081,7 @@ def discover_infrastructure(
     settings = settings or DiscoverySettings()
     worker_plan = build_discovery_worker_plan(settings.workers)
     started_clock = time.perf_counter()
-    started_at = datetime.now(UTC).isoformat()
+    started_at = datetime.now(timezone.utc).isoformat()
     if networks is None:
         try:
             primary_targets = detect_local_networks(settings.max_hosts_per_network)
@@ -1270,7 +1270,7 @@ def discover_infrastructure(
             key=lambda value: int(ipaddress.ip_address(value)),
         )
     )
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = datetime.now(timezone.utc).isoformat()
     duration_ms = round((time.perf_counter() - started_clock) * 1000, 2)
     _emit_progress(
         progress,
