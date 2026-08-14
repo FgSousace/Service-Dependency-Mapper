@@ -273,16 +273,13 @@ def _update_source_checkout(
     )
 
 
-
 def installer_download_url(version: str) -> str:
     """Return the official release asset URL for an installer version."""
 
     normalized_version = version.strip().lstrip("vV")
     version_key(normalized_version)
     filename = f"Service-Dependency-Mapper-Setup-{normalized_version}.exe"
-    return (
-        f"{REPOSITORY_URL}/releases/download/v{normalized_version}/{filename}"
-    )
+    return f"{REPOSITORY_URL}/releases/download/v{normalized_version}/{filename}"
 
 
 def _validate_installer_url(url: str) -> None:
@@ -335,9 +332,7 @@ def _download_installer(
                     break
                 total += len(chunk)
                 if total > MAX_INSTALLER_BYTES:
-                    raise UpdateError(
-                        "The downloaded installer is unexpectedly large."
-                    )
+                    raise UpdateError("The downloaded installer is unexpectedly large.")
                 output.write(chunk)
     except UpdateError:
         destination.unlink(missing_ok=True)
