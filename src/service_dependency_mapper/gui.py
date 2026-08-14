@@ -1165,7 +1165,11 @@ class ServiceDependencyMapperGui:
             (
                 f"Version {info.latest_version} is available "
                 f"(installed: {info.current_version}).{summary}\n\n"
-                "Install it now in the current Python environment?"
+                (
+                    "Download and open the Windows installer now?"
+                    if getattr(sys, "frozen", False)
+                    else "Install it now in the current Python environment?"
+                )
             ),
             parent=self.root,
         )
@@ -1179,7 +1183,10 @@ class ServiceDependencyMapperGui:
 
         def worker() -> None:
             try:
-                result = install_update()
+                result = install_update(
+                    latest_version=info.latest_version,
+                    installer_url=info.installer_url,
+                )
                 self.events.put(("update_installed", result))
             except Exception as exc:
                 self.events.put(
@@ -1197,9 +1204,23 @@ class ServiceDependencyMapperGui:
 
     def _show_update_installed(self, result: UpdateResult) -> None:
         self.update_install_running = False
-        self.update_installed = True
         self._set_busy(False)
         latest = self.latest_update.latest_version if self.latest_update else "latest"
+        if result.method == "Windows installer":
+            self.status.set(f"Windows installer for version {latest} was opened.")
+            messagebox.showinfo(
+                "Installer opened",
+                (
+                    f"The installer for version {latest} is ready. "
+                    "Complete the setup wizard to update the application.\n\n"
+                    "Service Dependency Mapper will now close."
+                ),
+                parent=self.root,
+            )
+            self._close()
+            return
+
+        self.update_installed = True
         self.version_badge.configure(text=f"v{latest}", foreground=GREEN)
         self.update_button.configure(
             text="Restart now",
@@ -1237,7 +1258,11 @@ class ServiceDependencyMapperGui:
     def restart_gui(self) -> None:
         """Start the updated GUI in the same interpreter and close this one."""
 
-        command = [sys.executable, "-m", "service_dependency_mapper", "gui"]
+        command = (
+            [sys.executable]
+            if getattr(sys, "frozen", False)
+            else [sys.executable, "-m", "service_dependency_mapper", "gui"]
+        )
         selected = self.config_path.get().strip()
         if selected:
             command.append(selected)
