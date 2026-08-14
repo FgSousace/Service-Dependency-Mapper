@@ -133,7 +133,7 @@ class UpdateInstallTests(unittest.TestCase):
             nested = root / "src" / "package"
             nested.mkdir(parents=True)
 
-            self.assertEqual(find_source_checkout(nested), root)
+            self.assertEqual(find_source_checkout(nested), root.resolve())
 
     def test_updates_clean_main_checkout_and_reinstalls_editable_package(self):
         with tempfile.TemporaryDirectory() as temp_dir:
