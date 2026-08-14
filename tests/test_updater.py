@@ -106,9 +106,7 @@ class UpdateCheckTests(unittest.TestCase):
             "releases/download/v1.6.0/"
             "Service-Dependency-Mapper-Setup-1.6.0.exe"
         )
-        payload = json.dumps(
-            {"version": "1.6.0", "installer_url": url}
-        ).encode()
+        payload = json.dumps({"version": "1.6.0", "installer_url": url}).encode()
         info = fetch_update_info(
             "1.5.0",
             opener=lambda _request, *, timeout: FakeResponse(payload),
