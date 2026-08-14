@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "service-dependency-mapper"
-version = "1.5.0"
+version = "1.6.0"
 description = "Discover infrastructure, visualize dependencies, and identify root-cause candidates."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -55,3 +55,6 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["service_dependency_mapper"]

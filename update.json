@@ -1,5 +1,6 @@
 {
-  "version": "1.5.0",
-  "released": "2026-07-30",
-  "summary": "Exact-IP full TCP discovery and cache-safe, truthful update status."
+  "version": "1.6.0",
+  "released": "2026-08-14",
+  "summary": "Installable Windows EXE with bundled runtime, shortcuts, uninstaller, and frozen-app updates.",
+  "installer_url": "https://github.com/FgSousace/Service-Dependency-Mapper/releases/download/v1.6.0/Service-Dependency-Mapper-Setup-1.6.0.exe"
 }

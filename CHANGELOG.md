@@ -2,6 +2,28 @@
 
 Wszystkie istotne zmiany w projekcie są dokumentowane w tym pliku.
 
+## [1.6.0] - 2026-08-14
+
+### Added
+
+- self-contained Windows desktop application built with PyInstaller,
+- installable Inno Setup `.exe` with Start menu and optional desktop shortcuts,
+- per-user installation that does not require Python, Git, or administrator access,
+- standard Windows uninstaller and post-install GUI launch,
+- GitHub Actions workflow that builds, verifies, and uploads the installer,
+- automatic publication of the setup executable for version tags.
+
+### Changed
+
+- frozen application updates now download and launch the official GitHub Release
+  installer instead of attempting to use `pip`,
+- the application and update feed version are now 1.6.0.
+
+### Fixed
+
+- Python 3.10 startup compatibility by avoiding the Python 3.11-only
+  `datetime.UTC` constant.
+
 ## [1.5.0] - 2026-07-30
 
 ### Added

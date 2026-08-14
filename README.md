@@ -4,12 +4,18 @@
 
 <p align="center">
   <a href="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml"><img src="https://github.com/FgSousace/Service-Dependency-Mapper/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
-  <img src="https://img.shields.io/badge/version-1.5.0-22c55e" alt="Version 1.5.0">
+  <img src="https://img.shields.io/badge/version-1.6.0-22c55e" alt="Version 1.6.0">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/discovery-LAN%20%7C%20VPN%20%7C%20exact%20IP-22d3ee" alt="LAN VPN and exact IP discovery">
   <img src="https://img.shields.io/badge/checks-ICMP%20%7C%20DNS%20%7C%20TCP%20%7C%20TLS%20%7C%20HTTP-06b6d4" alt="ICMP DNS TCP TLS HTTP">
   <img src="https://img.shields.io/badge/GUI-Tkinter-34d399" alt="Desktop GUI">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/FgSousace/Service-Dependency-Mapper/releases/download/v1.6.0/Service-Dependency-Mapper-Setup-1.6.0.exe">
+    <img src="https://img.shields.io/badge/POBIERZ_INSTALATOR_WINDOWS-.EXE-22c55e?style=for-the-badge&logo=windows11&logoColor=white" alt="Pobierz instalator Service Dependency Mapper dla Windows">
+  </a>
 </p>
 
 <p align="center">
@@ -80,7 +86,24 @@ szybciej rozpocząć właściwą eskalację.
 
 ## 🚀 Szybki start
 
-### Wymagania
+### Windows — zalecany instalator EXE
+
+Pobierz plik `Service-Dependency-Mapper-Setup-1.6.0.exe` z najnowszego
+[GitHub Release](https://github.com/FgSousace/Service-Dependency-Mapper/releases).
+Instalator zawiera aplikację, Pythona, Tkinter i wszystkie biblioteki. Nie
+trzeba osobno instalować Pythona ani Gita.
+
+Instalator:
+
+- instaluje aplikację w profilu bieżącego użytkownika,
+- dodaje skrót w menu Start i opcjonalnie na pulpicie,
+- rejestruje standardowy deinstalator Windows,
+- po zakończeniu może automatycznie uruchomić GUI,
+- aktualizuje wersję instalacyjną przez kolejne oficjalne instalatory.
+
+### Instalacja ze źródeł — dla deweloperów
+
+#### Wymagania
 
 - Python **3.10 lub nowszy**
 - Git
