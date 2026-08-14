@@ -19,6 +19,11 @@ Wszystkie istotne zmiany w projekcie są dokumentowane w tym pliku.
   installer instead of attempting to use `pip`,
 - the application and update feed version are now 1.6.0.
 
+### Fixed
+
+- Python 3.10 startup compatibility by avoiding the Python 3.11-only
+  `datetime.UTC` constant.
+
 ## [1.5.0] - 2026-07-30
 
 ### Added
