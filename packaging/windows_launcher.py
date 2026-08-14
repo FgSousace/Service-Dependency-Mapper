@@ -1,7 +1,6 @@
 """Frozen Windows entry point for Service Dependency Mapper."""
 
 from multiprocessing import freeze_support
-
 from service_dependency_mapper.gui import main
 
 
