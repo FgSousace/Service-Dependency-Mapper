@@ -13,6 +13,7 @@ from service_dependency_mapper.updater import (
     fetch_update_info,
     find_source_checkout,
     install_update,
+    installer_download_url,
     is_newer_version,
     version_key,
 )
@@ -88,6 +89,31 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertIn("1.2.0", captured["user_agent"])
         self.assertIn("_sdmap_cache=fresh-check", captured["url"])
         self.assertEqual(captured["cache_control"], "no-cache, no-store")
+
+    def test_builds_official_installer_download_url(self):
+        self.assertEqual(
+            installer_download_url("v1.6.0"),
+            (
+                "https://github.com/FgSousace/Service-Dependency-Mapper/"
+                "releases/download/v1.6.0/"
+                "Service-Dependency-Mapper-Setup-1.6.0.exe"
+            ),
+        )
+
+    def test_reads_installer_url_from_manifest(self):
+        url = (
+            "https://github.com/FgSousace/Service-Dependency-Mapper/"
+            "releases/download/v1.6.0/"
+            "Service-Dependency-Mapper-Setup-1.6.0.exe"
+        )
+        payload = json.dumps(
+            {"version": "1.6.0", "installer_url": url}
+        ).encode()
+        info = fetch_update_info(
+            "1.5.0",
+            opener=lambda _request, *, timeout: FakeResponse(payload),
+        )
+        self.assertEqual(info.installer_url, url)
 
     def test_rejects_invalid_manifest(self):
         def opener(_request, *, timeout):
@@ -167,6 +193,29 @@ class UpdateInstallTests(unittest.TestCase):
 
         with self.assertRaisesRegex(UpdateError, "local changes"):
             install_update(project_root=".", runner=runner)
+
+    @patch("service_dependency_mapper.updater.subprocess.Popen")
+    @patch("service_dependency_mapper.updater._download_installer")
+    def test_frozen_install_launches_windows_setup(self, download, popen):
+        installer = Path("Service-Dependency-Mapper-Setup-1.6.0.exe")
+        download.return_value = installer
+
+        result = install_update(
+            latest_version="1.6.0",
+            installer_url=(
+                "https://github.com/FgSousace/Service-Dependency-Mapper/"
+                "releases/download/v1.6.0/"
+                "Service-Dependency-Mapper-Setup-1.6.0.exe"
+            ),
+            frozen=True,
+        )
+
+        self.assertEqual(result.method, "Windows installer")
+        download.assert_called_once()
+        popen.assert_called_once_with(
+            [str(installer), "/SP-", "/CLOSEAPPLICATIONS"],
+            cwd=str(installer.parent),
+        )
 
     def test_non_checkout_install_uses_current_python_environment(self):
         commands = []
